@@ -3,8 +3,7 @@ name = "fisherA2Z"
 version = "0.0.1"
 authors = [
   { name="Husni Almoubayyed" },
-  { name="Tianqing Zhang" email = "tq96zhang@gmail.com"},
-]
+  { name="Tianqing Zhang", email = "tq96zhang@gmail.com"}]
 description = "A Fisher forecasting code for the LSST 3x2pt analysis"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -17,3 +16,7 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/LSSTDESC/fisherA2Z"
 Issues = "https://github.com/LSSTDESC/fisherA2Z/issues"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

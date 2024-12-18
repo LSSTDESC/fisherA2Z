@@ -18,6 +18,9 @@ from itertools import chain
 import seaborn as sns
 from sklearn.neighbors import KernelDensity
 import pickle
+import fisherA2Z
+
+package_path = fisherA2Z.__path__[0]
 
 def FoM(matrix):
     return np.sqrt(np.linalg.det(matrix))
@@ -154,13 +157,14 @@ class Fisher:
         self.has_run = False
         self.intCache = {}
         self.gbias = [1.376695, 1.451179, 1.528404, 1.607983, 1.689579, 1.772899, 1.857700, 1.943754, 2.030887, 2.118943] 
-        self.IA_interp = pickle.load(open('data/IA_interp.p', 'rb'))
+        print('read IA file from')
+        self.IA_interp = pickle.load(open(package_path + '/data/IA_interp.p', 'rb'))
         self.cosmo = cosmo
         self.step = step
         if self.y1:
-            df = pd.read_csv('data/nzdist_y1.txt', sep = ' ')
+            df = pd.read_csv(package_path + '/data/nzdist_y1.txt', sep = ' ')
         else:
-            df = pd.read_csv('data/nzdist.txt', sep=' ') 
+            df = pd.read_csv(package_path + '/data/nzdist.txt', sep=' ') 
         self.zmid = list(df['zmid'])
         self.dneff = df['dneff']
         self.z = [0] + self.zmid
@@ -340,7 +344,7 @@ class Fisher:
         self.pdf_z = SmailZ(self.zmid, np.array(self.dneff))
         self.dNdz_dict_source = {}
         
-        self.KDEs = pickle.load(open('data/KDEs.p', 'rb'))
+        self.KDEs = pickle.load(open(package_path + '/data/KDEs.p', 'rb'))
         self.scores = {}
         for index, (x,x2) in enumerate(zip(bins[:-1], bins[1:])):
             bias = self.zbias[index]
@@ -366,7 +370,7 @@ class Fisher:
 
             
                 
-    def getElls(self, file='data/ell-values.txt'):
+    def getElls(self, file= package_path + '/data/ell-values.txt'):
         #print('Getting Ells')
         ell = pd.read_csv(file, names=['ell'])
         self.ell = list(ell.to_dict()['ell'].values())
@@ -476,83 +480,31 @@ class Fisher:
             C_ells.append(list(ccl_cls[ccl_cls['zbin']==i]['C_ell']))
         return C_ells
 
-#     def buildCovMatrix(self):
-#         print('Getting covariance matrix')
-#         if self.probe == '3x2pt':
-#             invcov_SRD = pd.read_csv('data/Y10_3x2pt_inv.txt', 
-#                                      names=['a','b'], delimiter=' ')
-#             mat_len = 1000
-#         elif self.probe == 'ss':
-#             if self.y1 == False:
-#                 cov_SRD = np.loadtxt("data/Y10_3x2pt_clusterN_clusterWL_cov.txt")
-#                 cov_3x2 = np.zeros(shape = (705, 705))
-#                 for i in range(215275, 265275):
-    
-#                     this_line_cov_SRD = cov_SRD[i]
-#                     cov_3x2[int(this_line_cov_SRD[0])][int(this_line_cov_SRD[1])] = this_line_cov_SRD[-2] + this_line_cov_SRD[-1]
-#                 cov_shear_shear = cov_3x2[:300, :300]
-#                 for i in range(300):
-#                     for j in range(0,i):
-#                         cov_shear_shear[i][j] = cov_shear_shear[j][i]
-
-#                 slice_ = np.array([np.linspace(20*i, 20*i+14, 15) for i in range(15)]).reshape(-1).astype(int)
-#                 cov_shear_shear_trim = cov_shear_shear[slice_, :][:, slice_]
-#                 self.invcov = np.linalg.inv(cov_shear_shear_trim)                
-                
-#             else:
-#                 cov_SRD = np.loadtxt("data/Y1_3x2pt_clusterN_clusterWL_cov.txt")
-#                 cov_3x2 = np.zeros(shape = (705, 705))
-#                 for i in range(215275, 265275):
-    
-#                     this_line_cov_SRD = cov_SRD[i]
-#                     cov_3x2[int(this_line_cov_SRD[0])][int(this_line_cov_SRD[1])] = this_line_cov_SRD[-2] + this_line_cov_SRD[-1]
-#                 cov_shear_shear = cov_3x2[:300, :300]
-#                 for i in range(300):
-#                     for j in range(0,i):
-#                         cov_shear_shear[i][j] = cov_shear_shear[j][i]
-
-#                 slice_ = np.array([np.linspace(20*i, 20*i+14, 15) for i in range(15)]).reshape(-1).astype(int)
-#                 cov_shear_shear_trim = cov_shear_shear[slice_, :][:, slice_]
-#                 self.invcov = np.linalg.inv(cov_shear_shear_trim)                
-#             mat_len = 300
-#         elif self.probe == 'sl':
-#             invcov_SRD = pd.read_csv('data/Y10_shear_pos_inv.txt',
-#                                      names=['a','b'], delimiter=' ')
-#             mat_len = 500
-#         elif self.probe == 'll':
-#             invcov_SRD = pd.read_csv('data/Y10_pos_pos_inv.txt', 
-#                                      names=['a','b'], delimiter=' ')
-#             mat_len = 200
-        
-#         else:
-#             raise ValueError('Unkown Probe')
-            
-        
     
     def buildCovMatrix(self):
         print('Getting covariance matrix')
         if self.probe == '3x2pt':
-            invcov_SRD = pd.read_csv('data/Y10_3x2pt_inv.txt', 
+            invcov_SRD = pd.read_csv(package_path + '/data/Y10_3x2pt_inv.txt', 
                                      names=['a','b'], delimiter=' ')
             mat_len = 1000
         elif self.probe == 'ss':
             if self.y1 == False:
-                invcov_SRD = pd.read_csv('data/Y10_shear_shear_inv.txt', 
+                invcov_SRD = pd.read_csv(package_path + '/data/Y10_shear_shear_inv.txt', 
                                          names=['a','b'], delimiter=' ')
             else:
-                invcov_SRD = pd.read_csv('data/y1_shear_shear_inv.txt',
+                invcov_SRD = pd.read_csv(package_path + '/data/Y1_shear_shear_inv.txt',
                                         names = ['a', 'b'], delimiter = ' ')
             mat_len = 300
         elif self.probe == 'sl':
-            self.invcov = np.loadtxt('data/Y10_shear_pos_inv.txt')
+            self.invcov = np.loadtxt(package_path + '/data/Y10_shear_pos_inv.txt')
             mat_len = 500
             return
         elif self.probe == 'll':
-            invcov_SRD = pd.read_csv('data/Y10_pos_pos_inv.txt', 
+            invcov_SRD = pd.read_csv(package_path + '/data/Y10_pos_pos_inv.txt', 
                                      names=['a','b'], delimiter=' ')
             mat_len = 200
         elif self.probe == '2x2pt':
-            self.invcov = np.loadtxt('data/Y10_2x2_inv.txt')
+            self.invcov = np.loadtxt(package_path + '/data/Y10_2x2_inv.txt')
             return
         
         else:
@@ -676,24 +628,6 @@ class Fisher:
         z_input = self.zmid
         dNdz = list(dNdz)
         z = np.array(z_input)
-        # (z_k, kcorr, x,x,x) = np.loadtxt('data/kcorr.dat', unpack=True)
-        # (z_e, ecorr, x,x,x) = np.loadtxt('data/ecorr.dat', unpack=True)
-        # zmaxke = min(max(z_k), max(z_e))
-        # zminke = max(min(z_k), min(z_e))
-        # if (zminke>min(z_input) and zmaxke<max(z_input)):
-        #     z = np.linspace(zminke, zmaxke, 1000)
-        #     interp_dNdz = scipy.interpolate.interp1d(z_input, dNdz)
-        #     dNdz = interp_dNdz(z)
-        # elif (zmaxke<max(z_input)):
-        #     z = np.linspace(min(z_input), zmaxke, 1000)
-        #     interp_dNdz = scipy.interpolate.interp1d(z_input, dNdz)
-        #     dNdz = interp_dNdz(z)
-        # elif (zminke>min(z_input)):
-        #     z = np.linspace(zminke, max(z_input), 1000)
-        #     interp_dNdz = scipy.interpolate.interp1d(z_input, dNdz)
-        #     dNdz = interp_dNdz(z)
-        # else:
-        #     z = z_input
 
         # Get the luminosity function
         (L, phi_normed) = self.get_phi(z, self.cosmo, Mr_s, Q, alpha_lum, phi_0, P, mlim)
@@ -705,8 +639,6 @@ class Fisher:
         for zi in range(len(z)):
             Ai_ofzl[zi] = scipy.integrate.simps(np.asarray(phi_normed[zi]) * (np.asarray(L[zi]) / Lp)**(beta), np.asarray(L[zi]))
             
-
-#         print(scipy.integrate.simps((np.asarray(L[zi]) / Lp) * dNdz, z)/ scipy.integrate.simps(dNdz, z))
         # Integrate over dNdz
         Ai = scipy.integrate.simps(Ai_ofzl * dNdz, z) / scipy.integrate.simps(dNdz, z)
         
@@ -741,8 +673,8 @@ class Fisher:
 
         # Import the kcorr and ecorr correction from Poggianti (assumes elliptical galaxies)
         # No data for sources beyon z = 3, so we keep the same value at higher z as z=3
-        (z_k, kcorr, x,x,x) = np.loadtxt('data/kcorr.dat', unpack=True)
-        (z_e, ecorr, x,x,x) = np.loadtxt('data/ecorr.dat', unpack=True)
+        (z_k, kcorr, x,x,x) = np.loadtxt(package_path + '/data/kcorr.dat', unpack=True)
+        (z_e, ecorr, x,x,x) = np.loadtxt(package_path + '/data/ecorr.dat', unpack=True)
         kcorr_interp = CubicSpline(z_k, kcorr)
         ecorr_interp = CubicSpline(z_e, ecorr)
         kcorr = kcorr_interp(z)
