@@ -12,15 +12,14 @@ import numdifftools as nd
 from scipy.stats import uniform, norm
 from scipy.integrate import quad
 from scipy.interpolate import CubicSpline
-from copy import deepcopy
 from numbers import Number
-from itertools import chain
-import seaborn as sns
 from sklearn.neighbors import KernelDensity
+from itertools import permutations, chain
 import pickle
 import fisherA2Z
 
 package_path = fisherA2Z.__path__[0]
+ccl.gsl_params.LENSING_KERNEL_SPLINE_INTEGRATION = False
 
 def FoM(matrix):
     return np.sqrt(np.linalg.det(matrix))
@@ -165,7 +164,7 @@ class Fisher:
             df = pd.read_csv(package_path + '/data/nzdist_y1.txt', sep = ' ')
         else:
             df = pd.read_csv(package_path + '/data/nzdist.txt', sep=' ') 
-        self.zmid = list(df['zmid'])
+        self.zmid = np.array(list(df['zmid']))
         self.dneff = df['dneff']
         self.z = [0] + self.zmid
         self.funcs_ss = {
