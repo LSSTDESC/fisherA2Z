@@ -4,6 +4,30 @@
 
 This repository includes code used for the Fisher Information matrix computation used to assess the impact of photo-z modeling errors on 3x2pt inferences. The code is used and explained in Chapter 4 of Husni Almoubayyed's PhD thesis and an upcoming paper in prep.
 
+## Installation
+
+First, initialize a conda environment by
+
+```
+conda create -n 'fisher_env' python=3.8
+conda activate fisher_env
+```
+
+Clone the repository, and install from source by 
+
+```
+pip install -e .
+```
+
+Then you can add your conda environment to your jupyterLab by
+
+
+```
+conda install -c anaconda ipykernel
+python -m ipykernel install --user --name=fisher_env
+```
+
+
 ## Code
 
 The majority of the code is in fisher.py, and the Fisher class therein. 
