@@ -376,7 +376,11 @@ class Fisher:
             
             self.dNdz_dict_source[bin_centers[index]] = dndz_core_norm * (1-outlier) + dndz_outliers_norm * outlier
 
-            
+           
+    def setPriors(self, priors):
+        
+        for key in priors.keys():
+            self.priors = 1/(priors['key']**2)
                 
     def getElls(self, file= package_path + '/data/ell-values.txt'):
         #print('Getting Ells')
