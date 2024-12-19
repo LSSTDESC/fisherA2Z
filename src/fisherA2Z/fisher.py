@@ -304,7 +304,7 @@ class Fisher:
                 - outliers: {self.outliers}'
         
     def _makeLensPZ(self):
-        print("making lens pz")
+        print("Making lens pz")
         bins = np.linspace(0.2, 1.2, 11)
         self.gbias_dict = {}
         bin_centers = [.5*fsum([bins[i]+bins[i+1]]) for i in range(len(bins[:-1]))]
@@ -331,7 +331,7 @@ class Fisher:
         
 
     def _makeSourcePZ(self,  implement_outliers=True):
-
+        print("Making source pz")
         n = len(self.zmid)
         datapts = ([list(np.ones(int(self.dneff[i]/min(self.dneff)))*self.zmid[i]) for i in range(n)])
         datapts = list(chain.from_iterable(datapts)) # flatten
@@ -521,7 +521,7 @@ class Fisher:
         else:
             params = [param]
         for var in params:
-            print(var)
+            print("Getting derivatives of C_ell w.r.t.: ", var)
             zbin = 0
             j = 0
             to_concat = []
@@ -582,13 +582,10 @@ class Fisher:
         for i in range(self.end):
             fisher[i][i] += self.priors[self.param_order[i]]
         return fisher
-        
-    def process(self):
-        self._makeSourcePZ()
-        self._makeLensPZ()
-        self.getElls()
+    
+    def makeFidCells(self):
+        print("Making fiducial c_ells")
         all_cls = []
-        print("making cells")
         if self.probe in ['3x2pt', 'ss']:
             self.ShearShearFid = self.makeShearShearCells()
             all_cls.append(self.ShearShearFid)
@@ -599,7 +596,14 @@ class Fisher:
             self.PosPosFid = self.makePosPosCells()
             all_cls.append(self.PosPosFid)
         self.ccl_cls = np.vstack(tuple(all_cls))
+        
+    def process(self):
+        self._makeSourcePZ()
+        self._makeLensPZ()
+        self.getElls()
+        self.makeFidCells()
         self.buildCovMatrix()
+        
         if self.save_deriv is None:
             self.getDerivs()
         else:
