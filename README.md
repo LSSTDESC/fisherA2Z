@@ -2,7 +2,7 @@
 
 ## Introduction
 
-FisherA2Z is a Fisher forecasting code initially developed by Husni Almoubayyed for his PhD thesis Chapter 4. Tianqing Zhang refurbished the code in 2024 and publish the the results in Zhang et al in prep. "A2Z" stands for the initial of the last names of Almoubayyed and Zhang. 
+FisherA2Z is a Fisher forecasting code initially developed by Husni Almoubayyed for his PhD thesis Chapter 4. Tianqing Zhang refurbished the code in 2024 and prepared Zhang et al in prep. "A2Z" stands for the initial of Almoubayyed and Zhang. 
 
 This repository includes code used for the Fisher Information matrix computation used to assess the impact of photo-z modeling errors on 3x2pt inferences.
 
