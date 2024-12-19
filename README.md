@@ -2,7 +2,9 @@
 
 ## Introduction
 
-This repository includes code used for the Fisher Information matrix computation used to assess the impact of photo-z modeling errors on 3x2pt inferences. The code is used and explained in Chapter 4 of Husni Almoubayyed's PhD thesis and an upcoming paper in prep.
+FisherA2Z is a Fisher forecasting code initially developed by Husni Almoubayyed for his PhD thesis Chapter 4. Tianqing Zhang refurbished the code in 2024 and publish the the results in Zhang et al in prep. "A2Z" stands for the initial of the last names of Almoubayyed and Zhang. 
+
+This repository includes code used for the Fisher Information matrix computation used to assess the impact of photo-z modeling errors on 3x2pt inferences.
 
 ## Installation
 
@@ -48,7 +50,7 @@ f.process()
 then the Fisher information matrix will be stored in f.fisher.
 
 
-## Analysis
+<!-- ## Analysis
 
 The fisher.py contains simple functions that can be ran on the Fisher class to do simple fisher matrix analysis, such as marginalizing over a set of parameters, or plotting 2-dimensional contours
 
@@ -66,4 +68,4 @@ The following notebooks show examples of running the code to get cosmological in
 
 `3x2pt_interpretability.ipynb` notebook shows examples of how the Fisher matrix and a dataset of data-vectors are used to compute the importance of different photo-z error parameters on cosmological inferences, specifically on the bias induced in cosmological parameters when assuming a fixed incorrect photo-z model.
 
-`3x2pt_tree.ipynb` notebook computes the interpretability metrics used in the feature importance computation.
+`3x2pt_tree.ipynb` notebook computes the interpretability metrics used in the feature importance computation. -->
