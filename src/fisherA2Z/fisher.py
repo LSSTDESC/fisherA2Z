@@ -141,9 +141,19 @@ def centroid_shift(unbiased, biased):
 
 
 class Fisher:
-    def __init__(self, cosmo, zvariance=(0.05, 0.05, 0.05, 0.05, 0.05), zbias=(0,0,0,0,0), 
-                 outliers=(0.15, 0.15, 0.15, 0.15, 0.15), end=None, probe='3x2pt', 
-                 save_deriv = None, overwrite=True, y1 = False, step = 0.01):
+    def __init__(self, 
+                 cosmo, 
+                 zvariance=(0.05, 0.05, 0.05, 0.05, 0.05), 
+                 zbias=(0,0,0,0,0), 
+                 outliers=(0.15, 0.15, 0.15, 0.15, 0.15), 
+                 end=None, 
+                 probe='3x2pt', 
+                 save_deriv = None, overwrite=True, 
+                 y1 = False, 
+                 step = 0.01,
+                 gbias = [1.376695, 1.451179, 1.528404, 1.607983, 1.689579, 1.772899, 1.857700, 1.943754, 2.030887, 2.118943], 
+                 ia_params = {'A0': 5.92,'etal':-0.47,'etah': 0.0,'beta': 1.1},
+                ):
         self.save_deriv = save_deriv
         self.overwrite = overwrite
         self.zvariance = list(zvariance)
@@ -155,7 +165,7 @@ class Fisher:
         self.outliers = list(outliers)
         self.has_run = False
         self.intCache = {}
-        self.gbias = [1.376695, 1.451179, 1.528404, 1.607983, 1.689579, 1.772899, 1.857700, 1.943754, 2.030887, 2.118943] 
+        self.gbias = gbias
         self.IA_interp = pickle.load(open(package_path + '/data/IA_interp.p', 'rb'))
         self.cosmo = cosmo
         self.step = step
@@ -245,10 +255,10 @@ class Fisher:
             'omega_m': cosmo._params_init_kwargs['Omega_b']+cosmo._params_init_kwargs['Omega_c'],
             'w_0': cosmo._params_init_kwargs['w0'],
             'w_a': cosmo._params_init_kwargs['wa'],
-            'A0': 5.92,
-            'etal':-0.47,
-            'etah': 0.0,
-            'beta': 1.1
+            'A0': ia_params['A0'],
+            'etal':ia_params['etal'],
+            'etah':ia_params['etah'],
+            'beta':ia_params['beta']
         }
         for i in range(10):
             self.vals[f'gbias{i+1}'] = self.gbias[i]
