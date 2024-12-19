@@ -156,7 +156,6 @@ class Fisher:
         self.has_run = False
         self.intCache = {}
         self.gbias = [1.376695, 1.451179, 1.528404, 1.607983, 1.689579, 1.772899, 1.857700, 1.943754, 2.030887, 2.118943] 
-        print('read IA file from')
         self.IA_interp = pickle.load(open(package_path + '/data/IA_interp.p', 'rb'))
         self.cosmo = cosmo
         self.step = step
