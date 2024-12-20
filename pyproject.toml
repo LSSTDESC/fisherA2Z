@@ -20,7 +20,8 @@ dependencies = [
     "numdifftools==0.9.39",
     "scipy",
     "scikit-learn==1.1.0",
-    "PyYAML"
+    "PyYAML",
+    "jupyter"
 ]
 
 [project.urls]
