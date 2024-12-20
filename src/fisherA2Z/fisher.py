@@ -22,9 +22,29 @@ package_path = fisherA2Z.__path__[0]
 ccl.gsl_params.LENSING_KERNEL_SPLINE_INTEGRATION = False
 
 def FoM(matrix):
+    """
+    Calculate the Figure of Merit (FoM) for a given covariance matrix.
+
+    Parameters:
+    matrix (ndarray): Covariance matrix.
+
+    Returns:
+    float: Square root of the determinant of the matrix.
+    """
     return np.sqrt(np.linalg.det(matrix))
 
 def plot_contours(matrix, sigmas, fid, **kwargs):
+    """
+    Plot 1-sigma or 2-sigma confidence contours based on a covariance matrix.
+
+    Parameters:
+    matrix (ndarray): Covariance matrix.
+    sigmas (int): Sigma level (1 or 2).
+    fid (tuple): Fiducial values for the parameters.
+
+    Returns:
+    tuple: Ellipse object, x-limit, and y-limit for the plot.
+    """
     prefactor = {1:1.52, 2:2.48}
     prefactor = prefactor[sigmas]
     matrix = np.linalg.inv(matrix)
@@ -47,70 +67,158 @@ def plot_contours(matrix, sigmas, fid, **kwargs):
     return el, xlim, ylim
 
 def marginalize(fisher_matrix, i, j):
+    """
+    Marginalize a Fisher matrix over two parameters.
+
+    Parameters:
+    fisher_matrix (ndarray): Full Fisher matrix.
+    i (int): Index of the first parameter.
+    j (int): Index of the second parameter.
+
+    Returns:
+    ndarray: Marginalized Fisher matrix for the two parameters.
+    """
     return np.linalg.inv(np.linalg.inv(fisher_matrix)[np.ix_([i,j], [i,j])]) 
 
 class PhotoZ_core(object):
-    """Defines p(zp | z) of the core distribution (i.e. no outliers)
+    """
+    Defines the core probability density function (PDF) p(zp | z) for photometric redshifts.
     """
 
     def __init__(self, zp_support, zbias, sigma_z):
+        """
+        Initialize the PhotoZ_core object.
+
+        Parameters:
+        zp_support (array): Support of the photometric redshifts (zp).
+        zbias (float): Bias in the photometric redshift distribution.
+        sigma_z (float): Standard deviation of the distribution.
+        """
         self.zp_support = zp_support
         self.zbias = zbias
         self.sigma_z = sigma_z
 
     def get_pdf_given(self, z: Number):
+        """
+        Compute the PDF p(zp | z) for a given true redshift z.
+
+        Parameters:
+        z (Number): True redshift.
+
+        Returns:
+        ndarray: PDF values.
+        """
         rv = norm()
         scale = self.sigma_z * (1 + z)
         loc = z - self.zbias
         return rv.pdf((np.array(self.zp_support) - loc) / scale) / scale
 
 class Core(object):
-    """Defines the core and outlier population
     """
+    Represents a combined core and outlier population model.
+    """
+
     def __init__(self, zp_support, zbias, sigma_z):
+        """
+        Initialize the Core object.
+
+        Parameters:
+        zp_support (array): Support of the photometric redshifts (zp).
+        zbias (float): Bias in the photometric redshift distribution.
+        sigma_z (float): Standard deviation of the core distribution.
+        """
         self.zp_support = zp_support
         self.core = PhotoZ_core(zp_support, zbias, sigma_z)
 
     def get_pdf_given(self, z: Number):
+        """
+        Compute the PDF for a combined population given a true redshift z.
+
+        Parameters:
+        z (Number): True redshift.
+
+        Returns:
+        ndarray: Normalized PDF values.
+        """
         core_pdf = self.core.get_pdf_given(z)
         return core_pdf/np.trapz(core_pdf, self.zp_support)
 
-
 class SmailZ(object):
-    """Define the True photometric redshift distribution
-    that follows a Smail Type distribution
     """
+    Represents a true redshift distribution following a Smail-type profile.
+    """
+
     def __init__(self, z_support, pdf_values_evaluated_at_zsupport):
+        """
+        Initialize the SmailZ object.
+
+        Parameters:
+        z_support (array): Support of the true redshifts (z).
+        pdf_values_evaluated_at_zsupport (array): PDF values evaluated at the z-support.
+        """
         self.z_support = z_support
         self.pdf = pdf_values_evaluated_at_zsupport/np.trapz(pdf_values_evaluated_at_zsupport, z_support)
 
     def get_pdf(self):
+        """
+        Get the normalized PDF.
+
+        Returns:
+        ndarray: PDF values.
+        """
         return self.pdf
 
     def get_pdf_convoled(self, filter_list):
+        """
+        Convolve the PDF with a set of filter functions.
+
+        Parameters:
+        filter_list (list): List of filter functions.
+
+        Returns:
+        ndarray: Array of convolved PDFs.
+        """
         output_tomo_list = np.array([el * self.pdf for el in filter_list]).T
         output_tomo_list = np.column_stack((self.z_support, output_tomo_list))
         return output_tomo_list
 
-
 class PhotozModel(object):
-    """Convolve the joint distribution p(z_s, z_p) with
-    a set of filter functions (e.g. gaussian or tophat)
-
-    The class function get_pdf produces an array of tomographic
-    bins
-
     """
+    Convolve a joint distribution p(z_s, z_p) with filters to produce tomographic bins.
+    """
+
     def __init__(self, pdf_z, pdf_zphot_given_z, filters):
+        """
+        Initialize the PhotozModel object.
+
+        Parameters:
+        pdf_z (SmailZ): True redshift distribution.
+        pdf_zphot_given_z (PhotoZ_core): Core distribution.
+        filters (list): List of filter functions.
+        """
         self.pdf_zphot_given_z = pdf_zphot_given_z
         self.pdf_z = pdf_z
         self.filter_list = filters
 
-
     def get_pdf(self):
+        """
+        Compute PDFs for all tomographic bins.
+
+        Returns:
+        ndarray: Array of tomographic bin PDFs.
+        """
         return np.array([self.get_pdf_tomo(el) for el in self.filter_list])
 
     def get_pdf_tomo(self, filter):
+        """
+        Compute the PDF for a single tomographic bin.
+
+        Parameters:
+        filter (ndarray): Filter function.
+
+        Returns:
+        ndarray: PDF values for the tomographic bin.
+        """
         z_support = self.pdf_z.z_support
         zp_support = self.pdf_zphot_given_z.zp_support
         z_pdf = self.pdf_z.get_pdf()
@@ -154,6 +262,84 @@ class Fisher:
                  gbias = [1.376695, 1.451179, 1.528404, 1.607983, 1.689579, 1.772899, 1.857700, 1.943754, 2.030887, 2.118943], 
                  ia_params = {'A0': 5.92,'etal':-0.47,'etah': 0.0,'beta': 1.1},
                 ):
+        """
+        Initializes the parameter object for cosmological analysis.
+
+        Parameters:
+        -----------
+        cosmo : object
+            The cosmology object providing initial parameters (e.g., sigma8, Omega_b).
+        zvariance : tuple of float, optional
+            Initial variances for redshift bins, default is (0.05, 0.05, 0.05, 0.05, 0.05).
+        zbias : tuple of float, optional
+            Initial biases for redshift bins, default is (0, 0, 0, 0, 0).
+        outliers : tuple of float, optional
+            Initial outlier fractions for redshift bins, default is (0.15, 0.15, 0.15, 0.15, 0.15).
+        end : int, optional
+            Number of parameters to consider; defaults to the total number of parameters.
+        probe : str, optional
+            Type of probe for analysis, default is '3x2pt'.
+        save_deriv : str or None, optional
+            Path to save derivative outputs, default is None.
+        overwrite : bool, optional
+            Whether to overwrite existing files, default is True.
+        y1 : bool, optional
+            Flag for using Year 1 data distributions, default is False.
+        step : float, optional
+            Step size for numerical derivatives, default is 0.01.
+        gbias : list of float, optional
+            Galaxy bias values for the redshift bins, default includes 10 values.
+        ia_params : dict, optional
+            Parameters for intrinsic alignment, with keys:
+                - 'A0' (amplitude), 
+                - 'etal' (low-z dependence),
+                - 'etah' (high-z dependence),
+                - 'beta' (scaling exponent).
+
+        Attributes:
+        -----------
+        save_deriv : str or None
+            Path for saving derivatives.
+        overwrite : bool
+            Overwrite existing files flag.
+        zvariance : list of float
+            Redshift variances adjusted for redshift scaling.
+        zbias : list of float
+            Redshift biases adjusted for redshift scaling.
+        outliers : list of float
+            Outlier fractions for redshift bins.
+        gbias : list of float
+            Galaxy bias values for each redshift bin.
+        IA_interp : object
+            Precomputed intrinsic alignment interpolation.
+        zmid : numpy.ndarray
+            Midpoints of redshift bins from data file.
+        dneff : pandas.Series
+            Effective number density per redshift bin.
+        z : list of float
+            Redshift midpoints including a 0 bin.
+        funcs_ss, funcs_sp, funcs_pp : dict
+            Functions for single, shear-shear, and position-position covariance.
+        vals : dict
+            Initial parameter values.
+        priors : dict
+            Parameter priors for Gaussian likelihoods.
+        param_order : list of str
+            Order of parameters for analysis.
+        param_labels : list of str
+            Latex-formatted labels for parameters.
+        probe : str
+            Type of probe used for cosmological analysis.
+        end : int
+            Total number of parameters.
+
+        Notes:
+        ------
+        This initialization processes input parameters and prepares 
+        required mappings for the likelihood analysis, including functions 
+        for derivative computation and pre-loading relevant data files.
+        """
+    
         self.save_deriv = save_deriv
         self.overwrite = overwrite
         self.zvariance = list(zvariance)
@@ -314,6 +500,23 @@ class Fisher:
                 - outliers: {self.outliers}'
         
     def _makeLensPZ(self):
+        """
+        Creates lens photometric redshift (PZ) distributions for specific redshift bins
+        and assigns galaxy bias values to each bin.
+
+        Parameters:
+            None
+
+        Attributes Created or Updated:
+            - self.gbias_dict (dict): Maps the centers of the redshift bins to galaxy bias values.
+            - self.pdf_z (SmailZ): SmailZ object representing the redshift distribution of galaxies.
+            - self.dNdz_dict_lens (dict): Maps the centers of redshift bins to their normalized redshift distributions (P(z)).
+
+        Process:
+            1. Divides the redshift range (0.2–1.2) into 10 bins.
+            2. Computes the photometric redshift distribution for each bin using a uniform filter and a Smail distribution.
+            3. Associates the corresponding galaxy bias (`self.gbias`) with each bin.
+        """
         print("Making lens pz")
         bins = np.linspace(0.2, 1.2, 11)
         self.gbias_dict = {}
@@ -331,6 +534,25 @@ class Fisher:
         
         
     def _NormalizePZ(self, qs, dNdz_dict_source, m=1):
+        """
+        Normalizes source photometric redshift (PZ) distributions such that the integral 
+        over the redshift range (0–4) is unity for each distribution.
+
+        Parameters:
+            qs (list or array): Scaling factors for normalizing the distributions.
+            dNdz_dict_source (dict): A dictionary where keys represent bin centers and values 
+                are redshift distributions (P(z)) for the source galaxies.
+            m (float, optional): Additional scaling factor applied uniformly across all 
+                distributions (default: 1).
+
+        Returns:
+            dict: The updated dictionary with normalized redshift distributions.
+
+        Process:
+            1. Scales each redshift distribution by the total sum of the scaling factors (`qs`).
+            2. Fits a cubic spline to interpolate each distribution.
+            3. Ensures that the integral of each redshift distribution over the range (0–4) equals 1 after normalization.
+        """
         for q, k in zip(qs, dNdz_dict_source.keys()):
             dNdz_dict_source[k] = dNdz_dict_source[k]*sum(qs)/q
             f = CubicSpline(self.zmid, dNdz_dict_source[k])
@@ -341,6 +563,37 @@ class Fisher:
         
 
     def _makeSourcePZ(self,  implement_outliers=True):
+        """
+        Generates source photometric redshift (PZ) distributions and accounts for outliers 
+        in redshift estimation if enabled.
+
+        Parameters:
+            implement_outliers (bool, optional): Determines whether to incorporate outlier 
+                distributions into the source PZ (default: True).
+
+        Attributes Created or Updated:
+            - self.bins (list): Redshift bin edges for the source galaxies.
+            - self.bin_centers (list): Centers of the redshift bins.
+            - self.pdf_z (SmailZ): SmailZ object representing the redshift distribution of galaxies.
+            - self.dNdz_dict_source (dict): Maps bin centers to their normalized source 
+                redshift distributions (P(z)).
+            - self.KDEs (list): Preloaded Kernel Density Estimates (KDEs) used to model outliers.
+            - self.scores (dict): KDE-derived scores for the redshift range, used to compute 
+                outlier distributions.
+
+        Process:
+            1. Creates bins and computes their centers based on the redshift midpoints (`self.zmid`).
+            2. Calculates the photometric redshift distribution for each bin using a Smail distribution 
+               and Core model for photometric errors.
+            3. If `implement_outliers` is True, combines the core redshift distribution with an outlier 
+               distribution weighted by the outlier fraction for each bin.
+            4. Normalizes both the core and outlier distributions to ensure their integrals over the range (0–4) equal 1.
+            5. Updates `self.dNdz_dict_source` with the combined (core + outliers) PZ for each bin.
+
+        Notes:
+            - The method uses preloaded KDEs stored in a file (`KDEs.p`) to estimate outlier distributions.
+            - Core redshift distributions are modeled using uniform filters and the `PhotozModel` class.
+        """
         print("Making source pz")
         n = len(self.zmid)
         datapts = ([list(np.ones(int(self.dneff[i]/min(self.dneff)))*self.zmid[i]) for i in range(n)])
@@ -378,26 +631,99 @@ class Fisher:
 
            
     def setPriors(self, priors):
-        
+        """
+        Sets the inverse square of the provided priors for use in the object's calculations.
+
+        Parameters:
+            priors (dict): A dictionary where the keys are parameter names and the values 
+                are the prior standard deviations (assumed to be positive).
+
+        Updates:
+            - self.priors (float): The computed inverse square of the prior standard deviations 
+                for all provided parameters.
+
+        Notes:
+            - This implementation overwrites `self.priors` with the computed value for 
+              the last key in the input dictionary, which may not align with expected behavior 
+              if multiple priors are provided.
+        """
         for key in priors.keys():
-            self.priors = 1/(priors['key']**2)
+            self.priors = 1/(priors[key]**2)
                 
     def getElls(self, file= package_path + '/data/ell-values.txt'):
-        #print('Getting Ells')
+        """
+        Loads the multipole moment values (ℓ) from a specified file and stores them as a list.
+
+        Parameters:
+            file (str): The path to the file containing ell values. Defaults to 
+                `package_path + '/data/ell-values.txt'`.
+
+        Updates:
+            - self.ell (list): A list of ℓ values loaded from the specified file.
+
+        Notes:
+            - The file should be a plain text file with one ℓ value per line.
+        """
         ell = pd.read_csv(file, names=['ell'])
         self.ell = list(ell.to_dict()['ell'].values())
         
     def A_h(self, z, etah):
+        """
+        Computes the amplitude scaling factor \( A_h \) for a given redshift \( z \) 
+        and scaling parameter \( \eta_h \).
+
+        Parameters:
+            z (float): The redshift value.
+            etah (float): The scaling parameter for \( A_h \).
+
+        Returns:
+            float: The scaling factor \( A_h \). If \( z > 0.75 \), the factor is 
+                   computed as \(((1+z)/(1+0.75))^{\eta_h}\); otherwise, it returns 1.
+        """
         if z>0.75:
             return ((1+z)/(1+0.75))**etah
         return 1
 
         
     def A_l(self, z, etal):
+        """
+        Computes the amplitude scaling factor \( A_l \) for a given redshift \( z \) 
+        and scaling parameter \( \eta_l \).
+
+        Parameters:
+            z (float): The redshift value.
+            etal (float): The scaling parameter for \( A_l \).
+
+        Returns:
+            float: The scaling factor \( A_l \), computed as 
+                   \(((1+z)/(1+0.62))^{\eta_l}\).
+        """
         return ((1+z)/(1+0.62))**etal
         
     
     def makeShearShearCells(self, cosmo=None):
+        """
+        Computes the shear-shear angular power spectrum \( C_\ell \) for different redshift bins 
+        using the cosmic shear weak lensing formalism.
+
+        Parameters:
+            cosmo (CCLCosmology, optional): The cosmology object to be used in the calculation. 
+                If not provided, the default cosmology from the object instance (`self.cosmo`) is used.
+
+        Returns:
+            list: A list of lists, where each sublist contains the computed \( C_\ell \) values 
+                  for a specific redshift bin.
+
+        Updates:
+            - self.shearshear_cls (pd.DataFrame): A DataFrame containing the computed shear-shear 
+                                                  angular power spectra for each redshift bin and multipole.
+
+        Notes:
+            - This method computes the angular power spectra \( C_\ell \) for shear-shear correlation 
+              between redshift bins, accounting for intrinsic alignment (IA) biases in the weak lensing tracers.
+            - The `self.dNdz_dict_source` should contain the redshift distribution for the sources in each bin.
+            - The `self.vals` dictionary should contain the necessary parameters, such as `A0`, `etal`, and `etah`.
+        """
         if not cosmo:
             cosmo = self.cosmo
         ccl_cls = pd.DataFrame()
@@ -427,6 +753,28 @@ class Fisher:
         return C_ells
     
     def makePosPosCells(self, cosmo=None):
+        """
+        Computes the position-position angular power spectrum \( C_\ell \) for different redshift bins 
+        using the number counts of galaxies or objects in the lens sample.
+
+        Parameters:
+            cosmo (CCLCosmology, optional): The cosmology object to be used in the calculation. 
+                If not provided, the default cosmology from the object instance (`self.cosmo`) is used.
+
+        Returns:
+            list: A list of lists, where each sublist contains the computed \( C_\ell \) values 
+                  for a specific redshift bin.
+
+        Updates:
+            - self.pospos_cls (pd.DataFrame): A DataFrame containing the computed position-position 
+                                               angular power spectra for each redshift bin and multipole.
+
+        Notes:
+            - This method computes the angular power spectra \( C_\ell \) for position-position correlation 
+              between redshift bins, using the lens sample's number counts.
+            - The `self.dNdz_dict_lens` should contain the redshift distribution for the lenses in each bin.
+            - The `self.gbias` should contain the galaxy bias values for each redshift bin.
+        """
         if not cosmo:
             cosmo = self.cosmo
         ccl_cls = pd.DataFrame()
@@ -451,6 +799,33 @@ class Fisher:
 
 
     def makePosShearCells(self, cosmo=None):
+        """
+        Computes the position-shear angular power spectrum \( C_\ell \) for different redshift bins 
+        between lens and source populations.
+
+        This method calculates the angular power spectra between position (lens) and shear (source) 
+        tracers for different redshift bins using the appropriate number density and bias values.
+
+        Parameters:
+            cosmo (CCLCosmology, optional): The cosmology object to be used in the calculation. 
+                If not provided, the default cosmology from the object instance (`self.cosmo`) is used.
+
+        Returns:
+            list: A list of lists, where each sublist contains the computed \( C_\ell \) values 
+                  for a specific redshift bin.
+
+        Updates:
+            - self.posshear_cls (pd.DataFrame): A DataFrame containing the computed position-shear 
+                                                 angular power spectra for each redshift bin and multipole.
+
+        Notes:
+            - The `self.dNdz_dict_lens` should contain the redshift distribution for the lens (position) sample.
+            - The `self.dNdz_dict_source` should contain the redshift distribution for the source (shear) sample.
+            - The `self.gbias` should contain the galaxy bias values for each redshift bin of the lens sample.
+            - The `self.accept` set defines the allowed combinations of lens and source redshift bins for which 
+              the computation of \( C_\ell \) is performed.
+            - The method applies the intrinsic alignment (IA) model for both the lens and source tracers.
+        """
         if not cosmo:
             cosmo = self.cosmo
         ccl_cls = pd.DataFrame()
@@ -459,16 +834,16 @@ class Fisher:
         llst = list(self.dNdz_dict_lens.keys())
         slst = list(self.dNdz_dict_source.keys())
         self.accept = {(0,1), (0,2), (0,3), (0,4),
-                  (1,1), (1,2), (1,3), (1,4),
-                  (2,2), (2,3), (2,4),
-                  (3,2), (3,3), (3,4),
-                  (4,2), (4,3), (4,4),
-                  (5,3), (5,4),
-                  (6,3), (6,4),
-                  (7,3), (7,4),
-                  (8,4), 
-                  (9,4)
-                  }
+                      (1,1), (1,2), (1,3), (1,4),
+                      (2,2), (2,3), (2,4),
+                      (3,2), (3,3), (3,4),
+                      (4,2), (4,3), (4,4),
+                      (5,3), (5,4),
+                      (6,3), (6,4),
+                      (7,3), (7,4),
+                      (8,4), 
+                      (9,4)
+                      }
         for l, key in enumerate(llst):
             pos = ccl.NumberCountsTracer(cosmo, dndz=(self.zmid, self.dNdz_dict_lens[key]), has_rsd=False, bias=(self.zmid, self.gbias[l]*np.ones_like(self.zmid)))
             for s, keyj in enumerate(slst):
@@ -494,6 +869,34 @@ class Fisher:
 
     
     def buildCovMatrix(self):
+        """
+        Builds and loads the inverse covariance matrix based on the selected probe type.
+
+        Depending on the selected probe type (`3x2pt`, `ss`, `sl`, `ll`, or `2x2pt`), 
+        this method loads the corresponding inverse covariance matrix from pre-specified 
+        data files. It processes the data to reshape it into a square matrix and stores 
+        it in the `self.invcov` attribute for later use in the analysis.
+
+        The method reads data from the following sources:
+            - `Y10_3x2pt_inv.txt` for the '3x2pt' probe
+            - `Y10_shear_shear_inv.txt` or `Y1_shear_shear_inv.txt` for the 'ss' (shear-shear) probe
+            - `Y10_shear_pos_inv.txt` for the 'sl' (shear-position) probe
+            - `Y10_pos_pos_inv.txt` for the 'll' (position-position) probe
+            - `Y10_2x2_inv.txt` for the '2x2pt' probe
+
+        If the `probe` is 'sl' or '2x2pt', the method immediately loads and stores the covariance 
+        matrix without reshaping it, and no further processing is done.
+
+        Raises:
+            ValueError: If the `probe` type is not one of the expected values ('3x2pt', 'ss', 'sl', 'll', or '2x2pt').
+
+        Updates:
+            - `self.invcov` (numpy.ndarray): The reshaped inverse covariance matrix for the selected probe type.
+
+        Notes:
+            - The `mat_len` variable determines the size of the inverse covariance matrix, 
+              which is different for each probe type.
+        """
         print('Getting covariance matrix')
         if self.probe == '3x2pt':
             invcov_SRD = pd.read_csv(package_path + '/data/Y10_3x2pt_inv.txt', 
@@ -526,6 +929,33 @@ class Fisher:
         self.invcov = np.array(invcov_SRD['b']).reshape(mat_len, mat_len)
         
     def getDerivs(self, param=None):
+        """
+        Computes the derivatives of the C_ell values with respect to a given parameter.
+
+        This method calculates the derivatives of the C_ell values for different probes (e.g., 'ss', 'sl', 'll', '3x2pt', '2x2pt') 
+        with respect to a specific parameter. The derivatives are computed using finite differences, and the results are stored in 
+        the `self.derivs_sig` dictionary.
+
+        The method can compute derivatives for a specific parameter if provided, or it can compute the derivatives for all parameters 
+        in `self.param_order`. The derivatives are calculated for various types of correlation functions depending on the selected probe.
+
+        Parameters:
+            param (str, optional): The specific parameter for which to compute the derivatives. If not provided, derivatives 
+                                   are computed for all parameters up to `self.end`.
+
+        Updates:
+            - `self.derivs_sig` (dict): A dictionary containing the derivatives of the C_ell values with respect to the specified 
+                                         parameter(s). The keys are the parameter names, and the values are the computed derivatives.
+
+        Raises:
+            ValueError: If the probe type or parameter is not valid for the specified calculation.
+
+        Notes:
+            - The function uses the `nd.Derivative` class to calculate the numerical derivatives.
+            - The probe types considered in this function are 'ss', 'sl', 'll', '3x2pt', and '2x2pt'.
+            - The method calculates derivatives for shear-shear, shear-position, and position-position correlation functions depending 
+              on the probe type.
+        """
         print(f'Getting derivatives, number of parameters: {self.end}')
         if not param or not self.has_run:
             self.derivs_sig = {}
@@ -586,6 +1016,27 @@ class Fisher:
             self.derivs_sig[var] = np.vstack(tuple(to_concat))
             
     def getFisher(self):
+        """
+        Computes the Fisher matrix for parameter estimation.
+
+        This method calculates the Fisher matrix, which is used to quantify the information content of the data 
+        with respect to a set of parameters. The Fisher matrix is computed by evaluating the derivatives of the 
+        C_ell values (stored in `self.derivs_sig`) with respect to each parameter, using the inverse covariance matrix 
+        (`self.invcov`) and adding the contributions from prior information.
+
+        The matrix elements are calculated as the dot product of the derivatives with respect to two parameters, 
+        weighted by the inverse covariance matrix. The diagonal elements are adjusted by adding prior information 
+        (stored in `self.priors`).
+
+        Returns:
+            np.ndarray: The Fisher matrix, a square matrix where each element represents the information content 
+                        for pairs of parameters.
+
+        Notes:
+            - The Fisher matrix is used to estimate the precision with which parameters can be determined from the data.
+            - The prior values are added to the diagonal elements of the Fisher matrix.
+            - The function assumes that `self.derivs_sig`, `self.invcov`, and `self.priors` are already set.
+        """
         print('Building fisher matrix')
         fisher = np.zeros((self.end, self.end))
         derivs = deepcopy(self.derivs_sig)
@@ -598,6 +1049,25 @@ class Fisher:
         return fisher
     
     def makeFidCells(self):
+        """
+        Constructs fiducial C_ell values for different probes.
+
+        This method computes the fiducial C_ell values for shear-shear, shear-position, and position-position 
+        correlation functions depending on the selected probe. It uses the respective functions (`makeShearShearCells`, 
+        `makePosShearCells`, and `makePosPosCells`) to generate the C_ell values and stores them in the 
+        `self.ShearShearFid`, `self.PosShearFid`, and `self.PosPosFid` attributes.
+
+        The fiducial C_ell values are then combined into a single array (`self.ccl_cls`) that contains all the 
+        correlation functions for the given probe.
+
+        Notes:
+            - The method only computes the C_ell values for the probes that are selected in the `self.probe` attribute.
+            - The probes considered are: '3x2pt', 'ss', 'sl', 'll', and '2x2pt'.
+            - The fiducial C_ell values are used as a baseline for calculating the derivatives and Fisher matrix.
+
+        Returns:
+            np.ndarray: The stacked C_ell values for all the relevant probes.
+        """
         print("Making fiducial c_ells")
         all_cls = []
         if self.probe in ['3x2pt', 'ss']:
@@ -612,6 +1082,31 @@ class Fisher:
         self.ccl_cls = np.vstack(tuple(all_cls))
         
     def process(self):
+        """
+        Orchestrates the full pipeline of calculations for the analysis.
+
+        This method serves as the main processing function, coordinating the steps necessary to compute the 
+        Fisher matrix and the derivatives of the C_ell values. It calls other internal methods to:
+        - Compute the source and lens photometric redshift distributions.
+        - Retrieve the ell values for angular power spectra.
+        - Generate the fiducial C_ell values.
+        - Build the covariance matrix.
+        - Compute the derivatives of the C_ell values with respect to the model parameters.
+        - Calculate the Fisher matrix.
+
+        If derivatives have been previously saved to a file, the method can load them from the specified location, 
+        or it can recompute them and optionally overwrite the saved file.
+
+        Attributes modified:
+            - `self.derivs_sig`: The computed derivatives of C_ell with respect to the parameters.
+            - `self.fisher`: The computed Fisher matrix.
+            - `self.has_run`: A flag set to `True` indicating that the processing has completed.
+
+        Notes:
+            - If `self.save_deriv` is `None`, derivatives are recalculated and stored in `self.derivs_sig`.
+            - If `self.save_deriv` is provided, the method will attempt to load the derivatives from the specified 
+              file, unless `self.overwrite` is `True`, in which case the derivatives are recalculated and saved.
+        """
         self._makeSourcePZ()
         self._makeLensPZ()
         self.getElls()
