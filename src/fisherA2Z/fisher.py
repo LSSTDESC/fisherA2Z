@@ -259,7 +259,6 @@ class Fisher:
                  save_deriv = None, overwrite=True, 
                  y1 = False, 
                  step = 0.01,
-                 gbias = [1.376695, 1.451179, 1.528404, 1.607983, 1.689579, 1.772899, 1.857700, 1.943754, 2.030887, 2.118943], 
                  ia_params = {'A0': 5.92,'etal':-0.47,'etah': 0.0,'beta': 1.1},
                 ):
         """
@@ -357,8 +356,13 @@ class Fisher:
         self.step = step
         if self.y1:
             df = pd.read_csv(package_path + '/data/nzdist_y1.txt', sep = ' ')
+            self.gbias = [1.562362, 1.732963, 1.913252, 2.100644, 2.29321]
+            self.nlens = 5
         else:
             df = pd.read_csv(package_path + '/data/nzdist.txt', sep=' ') 
+            self.gbias = [1.376695, 1.451179, 1.528404, 1.607983, 1.689579, 1.772899, 1.857700, 1.943754, 2.030887, 2.118943]
+            self.nlens = 10
+            
         self.zmid = np.array(list(df['zmid']))
         self.dneff = df['dneff']
         self.z = [0] + self.zmid
@@ -418,7 +422,7 @@ class Fisher:
             'etal': self.getC_ellOfIA_lowz_sp,
             'etah': self.getC_ellOfIA_highz_sp,
         }
-        for i in range(10):
+        for i in range(self.nlens):
             self.funcs_sp[f'gbias{i+1}'] = self.getC_ellOfgbias_sp_helper
             
         self.funcs_pp = {
@@ -430,7 +434,7 @@ class Fisher:
             'w_0': self.getC_ellOfw0_pp,
             'w_a': self.getC_ellOfwa_pp,
         }
-        for i in range(10):
+        for i in range(self.nlens):
             self.funcs_pp[f'gbias{i+1}'] = self.getC_ellOfgbias_pp_helper
 
         self.vals = {
@@ -446,7 +450,7 @@ class Fisher:
             'etah':ia_params['etah'],
             'beta':ia_params['beta']
         }
-        for i in range(10):
+        for i in range(self.nlens):
             self.vals[f'gbias{i+1}'] = self.gbias[i]
         for i in range(5):
             self.vals['zbias'+str(i+1)] = self.zbias[i]
@@ -480,11 +484,11 @@ class Fisher:
             'etal': 1/1.5**2,
             'etah': 1/0.5**2,
         }
-        for i in range(10):
+        for i in range(self.nlens):
             string = 'gbias'+str(i+1)
             self.priors[string] = 1/0.9**2
-        self.param_order = ['omega_m', 'sigma_8', 'n_s', 'w_0', 'w_a', 'omega_b', 'h', 'A0', 'beta', 'etal', 'etah'] + ['zbias'+str(i) for i in range(1, 6)] + ['zvariance'+str(i) for i in range(1,6)] + ['zoutlier'+str(i) for i in range(1,6)] + ['gbias'+str(i) for i in range(1,11)]
-        self.param_labels = [r'$\Omega_m$', r'$\sigma_8$', r'$n_s$', r'$w_0$', r'$w_a$', r'$\Omega_b$', r'$h$', r'$A_0$', r'$\beta$', r'$\eta_l$', r'$\eta_h$'] + [r'$z_{bias}$'+str(i) for i in range(1, 6)] + [r'$\std{z}$'+str(i) for i in range(1,6)] + [r'$out$'+str(i) for i in range(1,6)] + [rf'$b_g^{i}$' for i in range(1,11)]
+        self.param_order = ['omega_m', 'sigma_8', 'n_s', 'w_0', 'w_a', 'omega_b', 'h', 'A0', 'beta', 'etal', 'etah'] + ['zbias'+str(i) for i in range(1, 6)] + ['zvariance'+str(i) for i in range(1,6)] + ['zoutlier'+str(i) for i in range(1,6)] + ['gbias'+str(i) for i in range(1,self.nlens+1)]
+        self.param_labels = [r'$\Omega_m$', r'$\sigma_8$', r'$n_s$', r'$w_0$', r'$w_a$', r'$\Omega_b$', r'$h$', r'$A_0$', r'$\beta$', r'$\eta_l$', r'$\eta_h$'] + [r'$z_{bias}$'+str(i) for i in range(1, 6)] + [r'$\std{z}$'+str(i) for i in range(1,6)] + [r'$out$'+str(i) for i in range(1,6)] + [rf'$b_g^{i}$' for i in range(1,self.nlens+1)]
         if end:
             self.end = end
         else:
@@ -518,14 +522,18 @@ class Fisher:
             3. Associates the corresponding galaxy bias (`self.gbias`) with each bin.
         """
         print("Making lens pz")
-        bins = np.linspace(0.2, 1.2, 11)
+        bins = np.linspace(0.2, 1.2, self.nlens+1)
+        if self.y1 == False:
+            sigma_z = 0.03
+        else:
+            sigma_z = 0.06
         self.gbias_dict = {}
         bin_centers = [.5*fsum([bins[i]+bins[i+1]]) for i in range(len(bins[:-1]))]
         self.pdf_z = SmailZ(self.zmid, np.array(self.dneff))
         dNdz_dict_lens = {}
         qs = []
         for index, (x,x2) in enumerate(zip(bins[:-1], bins[1:])):
-            core = Core(self.zmid, zbias=0, sigma_z=0.03)
+            core = Core(self.zmid, zbias=0, sigma_z=sigma_z)
             tomofilter = uniform.pdf(self.zmid, loc=x, scale=x2-x)
             photoz_model = PhotozModel(self.pdf_z, core, [tomofilter])
             dNdz_dict_lens[bin_centers[index]] = photoz_model.get_pdf()[0]
@@ -833,17 +841,12 @@ class Fisher:
         j = 0
         llst = list(self.dNdz_dict_lens.keys())
         slst = list(self.dNdz_dict_source.keys())
-        self.accept = {(0,1), (0,2), (0,3), (0,4),
-                      (1,1), (1,2), (1,3), (1,4),
-                      (2,2), (2,3), (2,4),
-                      (3,2), (3,3), (3,4),
-                      (4,2), (4,3), (4,4),
-                      (5,3), (5,4),
-                      (6,3), (6,4),
-                      (7,3), (7,4),
-                      (8,4), 
-                      (9,4)
-                      }
+        if self.y1 == False:
+            self.accept = {(0,1), (0,2), (0,3), (0,4),(1,1), (1,2), (1,3), (1,4),
+                          (2,2), (2,3), (2,4), (3,2), (3,3), (3,4), (4,2), (4,3), (4,4),
+                          (5,3), (5,4), (6,3), (6,4), (7,3), (7,4), (8,4), (9,4)}
+        else:
+            self.accept = {(0,2),(0,3),(0,4),(1,3),(1,4),(2,4),(3,4)}
         for l, key in enumerate(llst):
             pos = ccl.NumberCountsTracer(cosmo, dndz=(self.zmid, self.dNdz_dict_lens[key]), has_rsd=False, bias=(self.zmid, self.gbias[l]*np.ones_like(self.zmid)))
             for s, keyj in enumerate(slst):
@@ -899,9 +902,14 @@ class Fisher:
         """
         print('Getting covariance matrix')
         if self.probe == '3x2pt':
-            invcov_SRD = pd.read_csv(package_path + '/data/Y10_3x2pt_inv.txt', 
+            if self.y1 == False:
+                invcov_SRD = pd.read_csv(package_path + '/data/Y10_3x2pt_inv.txt', 
                                      names=['a','b'], delimiter=' ')
-            mat_len = 1000
+                mat_len = 1000
+            else:
+                invcov_SRD = pd.read_csv(package_path + '/data/Y1_3x2pt_inv', 
+                                     names=['a','b'], delimiter=' ')
+                mat_len = 540
         elif self.probe == 'ss':
             if self.y1 == False:
                 invcov_SRD = pd.read_csv(package_path + '/data/Y10_shear_shear_inv.txt', 
@@ -911,15 +919,25 @@ class Fisher:
                                         names = ['a', 'b'], delimiter = ' ')
             mat_len = 300
         elif self.probe == 'sl':
-            self.invcov = np.loadtxt(package_path + '/data/Y10_shear_pos_inv.txt')
-            mat_len = 500
+            if self.y1 == False:
+                self.invcov = np.loadtxt(package_path + '/data/Y10_shear_pos_inv.txt')
+            else: 
+                self.invcov = np.loadtxt(package_path + '/data/Y1_pos_shear_inv.txt')
             return
         elif self.probe == 'll':
-            invcov_SRD = pd.read_csv(package_path + '/data/Y10_pos_pos_inv.txt', 
+            if self.y1 == False:
+                invcov_SRD = pd.read_csv(package_path + '/data/Y10_pos_pos_inv.txt', 
                                      names=['a','b'], delimiter=' ')
-            mat_len = 200
+                mat_len = 200
+            else:
+                invcov_SRD = pd.read_csv(package_path + '/data/Y1_pos_pos_inv', 
+                                     names=['a','b'], delimiter=' ')
+                mat_len = 100
         elif self.probe == '2x2pt':
-            self.invcov = np.loadtxt(package_path + '/data/Y10_2x2_inv.txt')
+            if self.y1 == False:
+                self.invcov = np.loadtxt(package_path + '/data/Y10_2x2_inv.txt')
+            else:
+                self.invcov = np.loadtxt(package_path + '/data/Y1_2x2_inv.txt')
             return
         
         else:
