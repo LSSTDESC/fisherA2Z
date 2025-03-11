@@ -350,7 +350,6 @@ class Fisher:
         self.outliers = list(outliers)
         self.has_run = False
         self.intCache = {}
-        self.gbias = gbias
         self.IA_interp = pickle.load(open(package_path + '/data/IA_interp.p', 'rb'))
         self.cosmo = cosmo
         self.step = step
