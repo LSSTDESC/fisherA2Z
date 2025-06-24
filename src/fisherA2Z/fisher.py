@@ -64,7 +64,7 @@ def plot_contours(matrix, sigmas, fid, **kwargs):
     el = matplotlib.patches.Ellipse(fid, 2*a, 2*b, angle=-np.degrees(theta), alpha=0.3, **kwargs)
     xlim = np.sqrt(a**2*np.cos(theta)**2 + b**2*np.sin(theta)**2)
     ylim = np.sqrt(a**2*np.sin(theta)**2 + b**2*np.cos(theta)**2)
-    return el, xlim, ylim
+    return el, xlim, ylim, np.pi*a*b
 
 def marginalize(fisher_matrix, i, j):
     """
@@ -540,6 +540,17 @@ class Fisher:
         self.dNdz_dict_lens = dNdz_dict_lens
         
         
+    def override_priors(self, priors):
+        """
+        priors: dictionary with {param:gaussian_prior}
+        """
+        keys = priors.keys()
+        for key in keys:
+            self.priors[key] = 1/priors[key]**2
+            
+        return 0
+    
+    
     def _NormalizePZ(self, qs, dNdz_dict_source, m=1):
         """
         Normalizes source photometric redshift (PZ) distributions such that the integral 
@@ -635,6 +646,7 @@ class Fisher:
             dndz_outliers_norm = dndz_outliers/ quad(fo, 0, 4)[0]
             
             self.dNdz_dict_source[bin_centers[index]] = dndz_core_norm * (1-outlier) + dndz_outliers_norm * outlier
+
 
            
     def setPriors(self, priors):
