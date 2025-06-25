@@ -1167,7 +1167,10 @@ class Fisher:
                 with open(self.save_deriv, 'wb') as output:
                     pickle.dump(self.derivs_sig, output, pickle.HIGHEST_PROTOCOL)
             else:
-                self.derivs_sig = pickle.load(open(self.save_deriv,'rb'))
+                if os.path.exists(self.save_deriv):
+                    self.derivs_sig = pickle.load(open(self.save_deriv,'rb'))
+                else:
+                    self.getDerivs()
         self.fisher = self.getFisher()
         self.has_run = True
         print('Done')
@@ -1463,7 +1466,6 @@ class Fisher:
                     z_mean = np.average(z, weights=nz)
                     # Apply shifts
                     zvarscale = zvar/self.vals[f'zvariance{index+1}']
-                    print(zvar,zvarscale )
                     # user-provided std scaling (e.g., 1.1 to widen)
                     # print(zvar, self.vals[f'zvariance{index+1}'], zvarscale, z_mean)
                     # Transform z grid
