@@ -17,6 +17,7 @@ from sklearn.neighbors import KernelDensity
 from itertools import permutations, chain
 import pickle
 import fisherA2Z
+import os
 
 package_path = fisherA2Z.__path__[0]
 ccl.gsl_params.LENSING_KERNEL_SPLINE_INTEGRATION = False
@@ -260,7 +261,8 @@ class Fisher:
                  y1 = False, 
                  step = 0.001,
                  ia_params = {'A0': 5.92,'etal':-0.47,'etah': 0.0,'beta': 1.1},
-                 customize_source_nz = None
+                 customize_source_nz = None,
+                 neff_source = None
                 ):
         """
         Initializes the parameter object for cosmological analysis.
@@ -354,6 +356,7 @@ class Fisher:
         self.IA_interp = pickle.load(open(package_path + '/data/IA_interp.p', 'rb'))
         self.cosmo = cosmo
         self.step = step
+        self.neff_source = neff_source
         if self.y1:
             df = pd.read_csv(package_path + '/data/nzdist_y1.txt', sep = ' ')
             self.gbias = [1.562362, 1.732963, 1.913252, 2.100644, 2.29321]
@@ -974,6 +977,71 @@ class Fisher:
             
         self.invcov = np.array(invcov_SRD['b']).reshape(mat_len, mat_len)
         
+    def inflate_covariance_matrix(self):
+        
+        cov = np.linalg.pinv(self.invcov)
+        neff_source = self.neff_source
+        assert len(neff_source) == 5, "Length of neff_source list must be 5"
+        
+        ss_factor = np.ones(300)
+        ss_index = ['11', '12', '13', '14', '15', 
+                    '22', '23', '24', '25', 
+                    '33','34','35', 
+                    '44', '45', 
+                    '55']
+        bin_counter = 0
+        if self.probe in ['3x2pt', 'ss']:
+            for bin_i in range(5):
+                for bin_j in range(bin_i,5):
+                    this_inflate_factor = np.sqrt(neff_source[bin_i]) * np.sqrt(neff_source[bin_j])
+                    ss_factor[bin_counter*20:(bin_counter+1)*20]/=this_inflate_factor
+                    bin_counter+=1  
+        
+        cov[:300, :] = cov[:300, :] * ss_factor[:, np.newaxis]
+        cov[:, :300] = cov[:, :300] * ss_factor[np.newaxis,:]
+        
+        if self.probe in ['3x2pt', '2x2pt', 'sl']:
+            accept = self.accept
+        
+            if self.y1 == False:
+                
+                accept = [(0,1), (0,2), (0,3), (0,4),(1,1), (1,2), (1,3), (1,4),
+                          (2,2), (2,3), (2,4), (3,2), (3,3), (3,4), (4,2), (4,3), (4,4),
+                          (5,3), (5,4), (6,3), (6,4), (7,3), (7,4), (8,4), (9,4)]
+                sl_factor = np.ones(500)
+                bin_counter = 0
+                for bin_pair in self.accept:
+                    sl_factor[bin_counter*20:(bin_counter+1)*20]/=np.sqrt(neff_source[bin_pair[1]])
+                    
+                if self.probe =='3x2pt':
+                    cov[300:800, :] = cov[300:800, :] * sl_factor[:, np.newaxis]
+                    cov[:, 300:800] = cov[:, 300:800] * sl_factor[np.newaxis,:]
+                else:
+                    cov[:500, :] = cov[:500, :] * sl_factor[:, np.newaxis]
+                    cov[:, :500] = cov[:, :500] * sl_factor[np.newaxis,:]
+
+            else:
+                accept = [(0,2),(0,3),(0,4),(1,3),(1,4),(2,4),(3,4)]
+
+                sl_factor = np.ones(140)
+                bin_counter = 0
+                for bin_pair in self.accept:
+                    sl_factor[bin_counter*20:(bin_counter+1)*20]/=np.sqrt(neff_source[bin_pair[1]])
+                    
+                if self.probe =='3x2pt':
+                    cov[300:440, :] = cov[300:440, :] * sl_factor[:, np.newaxis]
+                    cov[:, 300:440] = cov[:, 300:440] * sl_factor[np.newaxis,:]
+                else:
+                    cov[:140, :] = cov[:140, :] * sl_factor[:, np.newaxis]
+                    cov[:, :140] = cov[:, :140] * sl_factor[np.newaxis,:]
+
+        cov_mod_inv = np.linalg.pinv(cov)
+
+        self.invcov = cov_mod_inv
+
+        
+        
+        
     def getDerivs(self, param=None):
         """
         Computes the derivatives of the C_ell values with respect to a given parameter.
@@ -1158,6 +1226,9 @@ class Fisher:
         self.getElls()
         self.makeFidCells()
         self.buildCovMatrix()
+        
+        if self.neff_source is not None:
+            self.inflate_covariance_matrix()
         
         if self.save_deriv is None:
             self.getDerivs()
