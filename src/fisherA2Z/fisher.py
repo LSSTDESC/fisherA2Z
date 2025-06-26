@@ -979,29 +979,31 @@ class Fisher:
         
     def inflate_covariance_matrix(self):
         
-        cov = np.linalg.pinv(self.invcov)
+        
+        print('Inflating the covariance matrix')
+        cov = np.linalg.pinv(self.invcov, rcond=1e-45)
         neff_source = self.neff_source
         assert len(neff_source) == 5, "Length of neff_source list must be 5"
         
         ss_factor = np.ones(300)
         ss_index = ['11', '12', '13', '14', '15', 
                     '22', '23', '24', '25', 
-                    '33','34','35', 
+                    '33', '34', '35', 
                     '44', '45', 
                     '55']
-        bin_counter = 0
+        
         if self.probe in ['3x2pt', 'ss']:
+            bin_counter = 0
             for bin_i in range(5):
                 for bin_j in range(bin_i,5):
                     this_inflate_factor = np.sqrt(neff_source[bin_i]) * np.sqrt(neff_source[bin_j])
                     ss_factor[bin_counter*20:(bin_counter+1)*20]/=this_inflate_factor
                     bin_counter+=1  
-        
-        cov[:300, :] = cov[:300, :] * ss_factor[:, np.newaxis]
-        cov[:, :300] = cov[:, :300] * ss_factor[np.newaxis,:]
+            # print(ss_factor)
+            cov[:300, :] = cov[:300, :] * ss_factor[:, np.newaxis]
+            cov[:, :300] = cov[:, :300] * ss_factor[np.newaxis,:]
         
         if self.probe in ['3x2pt', '2x2pt', 'sl']:
-            accept = self.accept
         
             if self.y1 == False:
                 
@@ -1010,9 +1012,11 @@ class Fisher:
                           (5,3), (5,4), (6,3), (6,4), (7,3), (7,4), (8,4), (9,4)]
                 sl_factor = np.ones(500)
                 bin_counter = 0
-                for bin_pair in self.accept:
+                for bin_pair in accept:
+                    # print(bin_pair, neff_source[bin_pair[1]])
                     sl_factor[bin_counter*20:(bin_counter+1)*20]/=np.sqrt(neff_source[bin_pair[1]])
-                    
+                    bin_counter+=1
+                # print(sl_factor)
                 if self.probe =='3x2pt':
                     cov[300:800, :] = cov[300:800, :] * sl_factor[:, np.newaxis]
                     cov[:, 300:800] = cov[:, 300:800] * sl_factor[np.newaxis,:]
@@ -1025,9 +1029,9 @@ class Fisher:
 
                 sl_factor = np.ones(140)
                 bin_counter = 0
-                for bin_pair in self.accept:
+                for bin_pair in accept:
                     sl_factor[bin_counter*20:(bin_counter+1)*20]/=np.sqrt(neff_source[bin_pair[1]])
-                    
+                    bin_counter+=1
                 if self.probe =='3x2pt':
                     cov[300:440, :] = cov[300:440, :] * sl_factor[:, np.newaxis]
                     cov[:, 300:440] = cov[:, 300:440] * sl_factor[np.newaxis,:]
@@ -1035,7 +1039,7 @@ class Fisher:
                     cov[:140, :] = cov[:140, :] * sl_factor[:, np.newaxis]
                     cov[:, :140] = cov[:, :140] * sl_factor[np.newaxis,:]
 
-        cov_mod_inv = np.linalg.pinv(cov)
+        cov_mod_inv = np.linalg.pinv(cov, rcond=1e-16)
 
         self.invcov = cov_mod_inv
 
