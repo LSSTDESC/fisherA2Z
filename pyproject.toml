@@ -1,6 +1,6 @@
 [project]
 name = "fisherA2Z"
-version = "0.0.1"
+version = "0.3.0"
 authors = [
   { name="Husni Almoubayyed" },
   { name="Tianqing Zhang", email = "tq96zhang@gmail.com"}]
@@ -21,12 +21,17 @@ dependencies = [
     "scipy",
     "scikit-learn==1.1.0",
     "PyYAML",
-    "jupyter"
+    "jupyter",
+    "qp-prob",
+    "h5py"
 ]
 
 [project.urls]
 Homepage = "https://github.com/LSSTDESC/fisherA2Z"
 Issues = "https://github.com/LSSTDESC/fisherA2Z/issues"
+
+[project.scripts]
+forecast-pz = "fisherA2Z.cli:main"
 
 [build-system]
 requires = ["setuptools>=64", "setuptools_scm>=8", "cmake", "swig"]
