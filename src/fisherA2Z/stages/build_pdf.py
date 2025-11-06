@@ -291,14 +291,16 @@ def main(cfg_path):
 
     print(f"[REPORT] Wrote {out_pdf}")
 
-# fishera2z/stages/prepare_fisher.py
-def run(cfg_path: str | None = None):
-    # If your script doesn’t need a config, ignore cfg_path
-    # and call your existing main function.
-    # Example: main() or main2() or whatever you named it
-    from ._internal_prepare import main as _main  # if you split internal code
-    _main()  # or _main(cfg_path)
+from typing import Optional
 
+def run(cfg_path: Optional[str] = None):
+    if cfg_path is None:
+        raise ValueError("build_pdf.run requires a config path")
+    for fn_name in ("main", "main2", "main3", "run"):
+        fn = globals().get(fn_name, None)
+        if callable(fn):
+            return fn(cfg_path)
+    raise RuntimeError("build_pdf.py: no main/main2/main3/run(cfg) found")
 
 if __name__ == "__main__":
     import sys
