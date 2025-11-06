@@ -1,0 +1,36 @@
+# where the HDF5s live
+root_dir: "/global/cfs/cdirs/desc-pz/users/tqzhang/fisher/pzdc/run02-io/gold_baseline"
+
+# where to save results (created if missing)
+forecast_dir: "forecast"
+
+# photo-z methods to scan
+algorithms: [bpz, fzboost, gpz, knn, tpz]
+
+# binning strategies to scan
+binnings: [equal_count, uniform_binning]
+
+# stacking flavors used when summarizing single-NZ (match your filenames)
+stackings: [naive_stack, point_est_hist]
+
+# bins to evaluate
+bins: [0, 1, 2, 3, 4]
+
+# Fisher setup toggles (both are run)
+fisher_probes: ["3x2pt", "ss"]   # descriptive only; choose strings you like
+run_y1: true
+run_y10: true
+
+# prior model for zbias/(1+z) and sigma_z/(1+z)
+prior_bias_by_1plusz: [0.0033748401333931603, 0.002009509768983882, 0.0014755608769690715, 0.0014105683904443538, 0.0014513072890777077]
+prior_sigma_by_1plusz: [0.004716625922465073, 0.003090295191387617, 0.0015597532494761592, 0.001107323648684569, 0.0009287757727511037]
+
+# optional additive biases for outlier fractions (defaults to zeros if omitted)
+outlier_bias: [0.0, 0.0, 0.0, 0.0, 0.0]
+
+# fixed zvariance baseline used in Fisher (before adding sigmaz_bias)
+baseline_zvariance: [0.05, 0.05, 0.05, 0.05, 0.05]
+
+# cosmology + fisher paths or knobs (you already have these in your environment)
+save_deriv_template: "fisher_data/obj_deriv_{probe}_{y1}.pkl"  # used by base Fisher
+overwrite_deriv: false
