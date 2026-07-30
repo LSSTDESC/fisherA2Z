@@ -1,5 +1,5 @@
 [project]
-name = "fisherA2Z"
+name = "fisher-a2z"
 version = "0.3.0"
 authors = [
   { name="Husni Almoubayyed" },
