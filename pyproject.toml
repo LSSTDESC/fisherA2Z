@@ -26,6 +26,9 @@ dependencies = [
     "h5py"
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=7", "pytest-cov"]
+
 [project.urls]
 Homepage = "https://github.com/LSSTDESC/fisherA2Z"
 Issues = "https://github.com/LSSTDESC/fisherA2Z/issues"
@@ -36,3 +39,15 @@ forecast-pz = "fisherA2Z.cli:main"
 [build-system]
 requires = ["setuptools>=64", "setuptools_scm>=8", "cmake", "swig"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-data]
+# The IA luminosity-function tables and the SRD n(z)/covariance files are read
+# at runtime; without this a non-editable build installs the package without them.
+fisherA2Z = ["data/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "ccl: needs a small CCL evaluation (still fast, uses eisenstein_hu)",
+]
