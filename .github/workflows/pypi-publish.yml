@@ -34,6 +34,27 @@ jobs:
           python -m pip install --upgrade twine
           python -m twine check dist/*
 
+      # PyPI refuses to overwrite an existing file and reports it only as a bare
+      # "400 Bad Request", so catch a tag/version mismatch here where the error
+      # can actually say what is wrong.
+      - name: Verify built version matches the release tag
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          sdist=$(ls dist/*.tar.gz)
+          built=$(basename "$sdist" .tar.gz)
+          built=${built#fisher_a2z-}
+          expected=${TAG#v}
+          echo "Release tag:    $TAG (expected version $expected)"
+          echo "Built version:  $built"
+          if [ "$built" != "$expected" ]; then
+            echo "::error::Built version '$built' does not match release tag '$TAG'." \
+                 "The tag must point at a commit whose setuptools_scm version resolves" \
+                 "to '$expected'; uploading would fail with a 400 from PyPI."
+            exit 1
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist

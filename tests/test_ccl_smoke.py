@@ -199,6 +199,46 @@ def test_chi_eff_lens_matches_a_direct_ccl_call(small_flex):
     assert np.all(np.diff(small_flex.chi_eff_lens_Mpc) > 0)
 
 
+def test_the_default_lens_neff_is_a_total_split_across_bins():
+    """48 arcmin^-2 is the SRD *gold sample*, not the density of each bin."""
+    z, nz, reals = _toy_inputs()
+    flex = FisherFlex(
+        nz_source=nz, nz_realizations=reals, z_grid=z, neff_source=[2.0, 2.0],
+        fsky=0.1, sigma_e=0.26, n_lens_bins=10, verbose=False,
+    )
+
+    assert flex.neff_lens.size == 10
+    assert flex.neff_lens.sum() == pytest.approx(48.0, rel=1e-9)
+    assert np.all(flex.neff_lens < 10.0)
+
+
+def test_a_scalar_lens_neff_warns_that_it_is_per_bin():
+    """Broadcasting a scalar multiplies the sample by n_lens; say so."""
+    z, nz, reals = _toy_inputs()
+
+    with pytest.warns(UserWarning, match="per \\*bin\\*"):
+        flex = FisherFlex(
+            nz_source=nz, nz_realizations=reals, z_grid=z,
+            neff_source=[2.0, 2.0], fsky=0.1, sigma_e=0.26,
+            n_lens_bins=4, lens_neff=12.0, verbose=False,
+        )
+
+    assert np.allclose(flex.neff_lens, 12.0)
+    assert flex.neff_lens.sum() == pytest.approx(48.0)
+
+
+def test_a_per_bin_lens_neff_array_is_taken_verbatim(recwarn):
+    z, nz, reals = _toy_inputs()
+    want = [3.0, 4.0, 5.0, 6.0]
+    flex = FisherFlex(
+        nz_source=nz, nz_realizations=reals, z_grid=z, neff_source=[2.0, 2.0],
+        fsky=0.1, sigma_e=0.26, n_lens_bins=4, lens_neff=want, verbose=False,
+    )
+
+    assert np.allclose(flex.neff_lens, want)
+    assert not [w for w in recwarn if "per *bin*" in str(w.message)]
+
+
 def test_lensing_kernel_spline_integration_is_disabled():
     """Process-global CCL setting that A2Z relies on; must be set on import."""
     import pyccl as ccl

@@ -1,5 +1,5 @@
 from setuptools import setup
 
-setup(
-    use_scm_version=True,
-)
+# All configuration lives in pyproject.toml, including the setuptools_scm
+# version derivation. This shim exists only for legacy `setup.py` invocations.
+setup()

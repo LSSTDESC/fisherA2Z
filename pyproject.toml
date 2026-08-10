@@ -1,6 +1,10 @@
 [project]
 name = "fisher-a2z"
-version = "0.3.0"
+# The version is derived from the git tag by setuptools_scm (see
+# [tool.setuptools_scm] below), so a release always publishes the version that
+# was tagged. Do not add a static `version` here: a static value silently wins
+# over setuptools_scm and the build then re-publishes an old version.
+dynamic = ["version"]
 authors = [
   { name="Husni Almoubayyed" },
   { name="Tianqing Zhang", email = "tq96zhang@gmail.com"}]
@@ -37,13 +41,30 @@ Issues = "https://github.com/LSSTDESC/fisherA2Z/issues"
 forecast-pz = "fisherA2Z.cli:main"
 
 [build-system]
-requires = ["setuptools>=64", "setuptools_scm>=8", "cmake", "swig"]
+requires = ["setuptools>=64", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["fisherA2Z*"]
+# Without this, setuptools' namespace-package discovery treats `__pycache__`
+# and `.ipynb_checkpoints` as importable packages and ships stale .pyc files
+# and notebook checkpoints inside the wheel.
+namespaces = false
 
 [tool.setuptools.package-data]
 # The IA luminosity-function tables and the SRD n(z)/covariance files are read
 # at runtime; without this a non-editable build installs the package without them.
 fisherA2Z = ["data/*"]
+
+[tool.setuptools.exclude-package-data]
+# setuptools_scm's file finder feeds every git-tracked file into the sdist, and
+# `include_package_data` (on by default) then copies anything under a package
+# directory into the wheel. Some .pyc files and notebook checkpoints are tracked
+# in this repo, so exclude them explicitly rather than shipping stale bytecode.
+"*" = ["__pycache__/*", ".ipynb_checkpoints/*", "*.pyc"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

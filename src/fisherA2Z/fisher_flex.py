@@ -591,7 +591,12 @@ class FisherFlex:
     y1 : bool
         Use the LSST Y1 lens preset (5 bins, sigma_z = 0.06) instead of Y10.
     lens_nz, z_lens, lens_neff, gbias, n_lens_bins
-        Override the default LSST lens sample.
+        Override the default LSST lens sample.  ``lens_neff`` is **per lens
+        bin**, in arcmin^-2 -- unlike the built-in default, which takes the SRD
+        *total* (48 arcmin^-2 for Y10, 18 for Y1) and splits it across the bins
+        by the dN/dz weights, giving 2.3-6.0 per bin for the 10-bin Y10 sample.
+        A scalar is broadcast to every bin and warns, since that multiplies the
+        sample by ``n_lens``.
     ggl_pairs : {'z_offset', 'a2z', 'all'} or sequence of (lens, source)
     ggl_offset : float
         For ``'z_offset'``: require ``mean(z)_source > mean(z)_lens + offset``.
@@ -727,9 +732,22 @@ class FisherFlex:
             )
 
         if lens_neff is not None:
+            lens_neff = np.atleast_1d(np.asarray(lens_neff, dtype=float))
+            if lens_neff.size == 1 and self.n_lens > 1:
+                # The default path splits a *total* across bins by dN/dz, so a
+                # bare scalar here is ambiguous -- and reading it as per-bin
+                # (which is what broadcasting does) silently multiplies the
+                # sample by n_lens.  Say what it came out as.
+                warnings.warn(
+                    f"lens_neff={float(lens_neff[0]):g} is per *bin*, giving "
+                    f"{float(lens_neff[0]) * self.n_lens:g} arcmin^-2 over all "
+                    f"{self.n_lens} lens bins. Pass an array of length "
+                    f"{self.n_lens} to set the per-bin densities directly. "
+                    "(For reference the LSST SRD gold sample totals 48 "
+                    "arcmin^-2 for Y10 and 18 for Y1.)"
+                )
             self.neff_lens = np.broadcast_to(
-                np.atleast_1d(np.asarray(lens_neff, dtype=float)), (self.n_lens,)
-            ).astype(float)
+                lens_neff, (self.n_lens,)).astype(float)
         else:
             total = NEFF_LENS_TOTAL_Y1 if self.y1 else NEFF_LENS_TOTAL_Y10
             self.neff_lens = total * weights
