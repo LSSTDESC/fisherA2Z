@@ -82,11 +82,19 @@ def nz_moments(z, nz):
         raise ValueError(
             f"n(z) has {nz.shape[-1]} redshift columns but z has {z.size} points."
         )
-    norm = np.trapz(nz, z, axis=-1)
+    try:
+        norm = np.trapz(nz, z, axis=-1)
+    except AttributeError:
+        norm = np.trapezoid(nz, z, axis=-1)
     if not np.all(np.isfinite(norm)) or np.any(norm <= 0):
         raise ValueError("n(z) with a zero or non-finite integral has no moments.")
-    mean = np.trapz(nz * z, z, axis=-1) / norm
-    var = np.trapz(nz * (z - mean[..., None]) ** 2, z, axis=-1) / norm
+    try:
+        mean = np.trapz(nz * z, z, axis=-1) / norm
+        var = np.trapz(nz * (z - mean[..., None]) ** 2, z, axis=-1) / norm
+    except AttributeError:
+        mean = np.trapezoid(nz * z, z, axis=-1) / norm
+        var = np.trapezoid(nz * (z - mean[..., None]) ** 2, z, axis=-1) / norm
+
     return mean, np.sqrt(np.clip(var, 0.0, None))
 
 
@@ -155,7 +163,10 @@ def shift_stretch_nz(z, nz_fid, dz=0.0, stretch=1.0, z_pivot=None,
 
     out = np.clip(out, 0.0, None)
     if renormalize:
-        total = np.trapz(out, z)
+        try:
+            total = np.trapz(out, z)
+        except:
+            total = np.trapezoid(out, z)
         if total > 0:
             out = out / total
     return out
@@ -191,7 +202,10 @@ def build_shift_stretch_model(z, nz_array):
     if np.any(nz < 0):
         warnings.warn("n(z) has negative values; clipping to zero.")
         nz = np.clip(nz, 0.0, None)
-    norm = np.trapz(nz, z, axis=1)
+    try:
+        norm = np.trapz(nz, z, axis=1)
+    except:
+        norm = np.trapezoid(nz, z, axis=1)
     if not np.all(np.isfinite(norm)) or np.any(norm <= 0):
         raise ValueError("every n(z) row must have a positive, finite integral.")
     nz = nz / norm[:, None]
