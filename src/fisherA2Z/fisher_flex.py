@@ -196,7 +196,10 @@ def _get_phi(z, cosmo, Mr_s=-20.70, Q=1.23, alpha_lum=-1.23, phi_0=0.0094,
     phi_normed = []
     for i in range(z.size):
         phi = phi_s[i] * (L[i] / Ls[i]) ** alpha_lum * np.exp(-L[i] / Ls[i])
-        phi_normed.append(phi / scipy.integrate.simps(phi, L[i]))
+        try:
+            phi_normed.append(phi / scipy.integrate.simps(phi, L[i]))
+        except AttributeError:
+            phi_normed.append(phi / scipy.integrate.simpson(phi, L[i]))
     return L, phi_normed
 
 
@@ -227,18 +230,28 @@ class _AiCache:
         if phi_key not in self._phi:
             self._phi[phi_key] = _get_phi(z, cosmo)
         L, phi_normed = self._phi[phi_key]
-        ai = np.array([
-            scipy.integrate.simps(phi_normed[i] * L[i] ** beta, L[i])
-            for i in range(z.size)
-        ])
+        try:
+            ai = np.array([
+                scipy.integrate.simps(phi_normed[i] * L[i] ** beta, L[i])
+                for i in range(z.size)
+            ])
+        except AttributeError:
+            ai = np.array([
+                scipy.integrate.simpson(phi_normed[i] * L[i] ** beta, L[i])
+                for i in range(z.size)
+            ])
         self._ai[key] = ai
         return ai
 
 
 def _ai_for_nz(z, nz, ai_of_z):
     """n(z)-weighted average of ``Ai(z)``."""
-    return (scipy.integrate.simps(ai_of_z * nz, z)
-            / scipy.integrate.simps(nz, z))
+    try:
+        return (scipy.integrate.simps(ai_of_z * nz, z)
+                / scipy.integrate.simps(nz, z))
+    except AttributeError:
+        return (scipy.integrate.simpson(ai_of_z * nz, z)
+                / scipy.integrate.simpson(nz, z))
 
 
 # --------------------------------------------------------------------------
@@ -705,10 +718,17 @@ class FisherFlex:
             if self.nz_lens.shape[1] != self.z_lens.size:
                 raise ValueError("lens_nz and z_lens have inconsistent shapes.")
             self.n_lens = self.nz_lens.shape[0]
-            self.z_eff_lens = np.array([
-                np.trapz(self.z_lens * n, self.z_lens) / np.trapz(n, self.z_lens)
-                for n in self.nz_lens
-            ])
+            try:
+                self.z_eff_lens = np.array([
+                    np.trapz(self.z_lens * n, self.z_lens) / np.trapz(n, self.z_lens)
+                    for n in self.nz_lens
+                ])
+            except AttributeError:
+                self.z_eff_lens = np.array([
+                    np.trapezoid(self.z_lens * n, self.z_lens) / np.trapezoid(n, self.z_lens)
+                    for n in self.nz_lens
+                ])
+
             weights = np.ones(self.n_lens) / self.n_lens
         else:
             self.n_lens = int(n_lens_bins or (5 if self.y1 else 10))
@@ -874,8 +894,12 @@ class FisherFlex:
             )
 
     def _resolve_ggl_pairs(self, spec, offset):
-        z_src = np.array([np.trapz(self.z * n, self.z) / np.trapz(n, self.z)
-                          for n in self.nz_source])
+        try:
+            z_src = np.array([np.trapz(self.z * n, self.z) / np.trapz(n, self.z)
+                            for n in self.nz_source])
+        except AttributeError:
+            z_src = np.array([np.trapezoid(self.z * n, self.z) / np.trapezoid(n, self.z)
+                            for n in self.nz_source])
         self.z_mean_source = z_src
         if isinstance(spec, str):
             if spec == "z_offset":
@@ -1539,7 +1563,11 @@ def _default_lens_sample(n_lens, y1=False):
 
     edges = np.linspace(0.2, 1.2, n_lens + 1)
     centers = 0.5 * (edges[:-1] + edges[1:])
-    pdf = dneff / np.trapz(dneff, z)
+    try:
+        pdf = dneff / np.trapz(dneff, z)
+    except AttributeError:
+        pdf = dneff / np.trapezoid(dneff, z)
+
 
     nz = np.empty((n_lens, z.size))
     weights = np.empty(n_lens)
@@ -1549,10 +1577,17 @@ def _default_lens_sample(n_lens, y1=False):
         for k in range(z.size):
             scale = sigma_z * (1.0 + z[k])
             core = norm.pdf((z - z[k]) / scale) / scale
-            core = core / np.trapz(core, z)
+            try:
+                core = core / np.trapz(core, z)
+            except AttributeError:
+                core = core / np.trapezoid(core, z)
             joint[:, k] = core * pdf[k] * tomofilter[k]
-        row = np.trapz(joint, z, axis=1)
-        weights[i] = np.trapz(row, z)
+        try:
+            row = np.trapz(joint, z, axis=1)
+            weights[i] = np.trapz(row, z)
+        except AttributeError:
+            row = np.trapezoid(joint, z, axis=1)
+            weights[i] = np.trapezoid(row, z)
         nz[i] = row / weights[i]
     weights = weights / weights.sum()
     z_eff = centers
