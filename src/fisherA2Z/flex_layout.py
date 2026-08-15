@@ -50,6 +50,7 @@ __all__ = [
     "ell_max_kcut",
     "build_mask",
     "fisher_from_derivs",
+    "bias_vector_from_derivs",
 ]
 
 #: Steradians per square arcminute, i.e. (180 * 60 / pi)^2.
@@ -447,21 +448,83 @@ def fisher_from_derivs(deriv, cov_blocks, mask=None, jitter=0.0):
         if sel.size == 0:
             continue
         n_data += sel.size
-        c = cov_blocks[l][np.ix_(sel, sel)]
-        if jitter:
-            c = c + jitter * np.diag(np.diag(c))
         d = deriv[:, sel, l].T  # (n_sel, n_par)
-        try:
-            cf = cho_factor(c, lower=True, check_finite=False)
-            x = cho_solve(cf, d, check_finite=False)
-        except np.linalg.LinAlgError:
-            warnings.warn(
-                f"covariance block at ell index {l} is not positive definite; "
-                "falling back to a pseudo-inverse."
-            )
-            x = np.linalg.pinv(c) @ d
+        x = _solve_block(cov_blocks[l][np.ix_(sel, sel)], d, l, jitter)
         fisher += d.T @ x
     return 0.5 * (fisher + fisher.T), n_data
+
+
+def _solve_block(c, rhs, l, jitter=0.0):
+    """``Cov_l^{-1} rhs`` for one ell block, with a warned pinv fallback.
+
+    Shared by :func:`fisher_from_derivs` and :func:`bias_vector_from_derivs` so
+    the two cannot drift apart in how they treat an ill-conditioned block.
+    """
+    if jitter:
+        c = c + jitter * np.diag(np.diag(c))
+    try:
+        cf = cho_factor(c, lower=True, check_finite=False)
+        return cho_solve(cf, rhs, check_finite=False)
+    except np.linalg.LinAlgError:
+        warnings.warn(
+            f"covariance block at ell index {l} is not positive definite; "
+            "falling back to a pseudo-inverse."
+        )
+        return np.linalg.pinv(c) @ rhs
+
+
+def bias_vector_from_derivs(deriv, cov_blocks, delta, mask=None, jitter=0.0):
+    """Numerator of the Fisher-bias formula, summed over independent ell blocks.
+
+    ``B_a = sum_l  D_l[mask_l, a]^T  Cov_l[mask_l, mask_l]^{-1}  delta_l[mask_l]``
+
+    This is the bracketed term of Eq. (13) of Zhang et al. (2025); the parameter
+    bias itself is ``F^{-1} B`` with ``F`` the *same* Fisher matrix returned by
+    :func:`fisher_from_derivs` under the *same* ``mask``, plus its priors.
+
+    Parameters
+    ----------
+    deriv : ndarray, shape (n_par, n_blocks, n_ell)
+    cov_blocks : ndarray, shape (n_ell, n_blocks, n_blocks)
+    delta : ndarray, shape (n_blocks, n_ell)
+        Residual data vector, ``C_ell^biased - C_ell^fiducial``.
+    mask : ndarray of bool, shape (n_blocks, n_ell), optional
+        ``None`` means use everything.
+
+    Returns
+    -------
+    bias_vec : ndarray, shape (n_par,)
+    n_data : int
+        Number of data-vector elements actually used.
+    """
+    deriv = np.asarray(deriv, dtype=float)
+    cov_blocks = np.asarray(cov_blocks, dtype=float)
+    delta = np.asarray(delta, dtype=float)
+    n_par, n_blocks, n_ell = deriv.shape
+    if cov_blocks.shape != (n_ell, n_blocks, n_blocks):
+        raise ValueError(
+            f"cov_blocks has shape {cov_blocks.shape}, expected "
+            f"({n_ell}, {n_blocks}, {n_blocks})."
+        )
+    if delta.shape != (n_blocks, n_ell):
+        raise ValueError(
+            f"delta has shape {delta.shape}, expected ({n_blocks}, {n_ell})."
+        )
+    if mask is None:
+        mask = np.ones((n_blocks, n_ell), dtype=bool)
+    mask = np.asarray(mask, dtype=bool)
+
+    bias_vec = np.zeros(n_par)
+    n_data = 0
+    for l in range(n_ell):
+        sel = np.flatnonzero(mask[:, l])
+        if sel.size == 0:
+            continue
+        n_data += sel.size
+        d = deriv[:, sel, l].T  # (n_sel, n_par)
+        x = _solve_block(cov_blocks[l][np.ix_(sel, sel)], delta[sel, l], l, jitter)
+        bias_vec += d.T @ x
+    return bias_vec, n_data
 
 
 def dense_covariance(cov_blocks, mask=None):

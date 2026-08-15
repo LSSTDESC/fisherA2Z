@@ -17,7 +17,7 @@ and replaces the three rigid pieces:
    ``sigma_e`` (see :mod:`fisherA2Z.flex_layout`);
 3. the number of tomographic bins is arbitrary.
 
-Two photo-z models are available, selected with ``nz_model``:
+Three photo-z models are available, selected with ``nz_model``:
 
 ``'shift_stretch'`` (default)
     The measured n(z) is its own template, with a shift ``zbias_i`` and a
@@ -34,6 +34,15 @@ Two photo-z models are available, selected with ``nz_model``:
     separable population of catastrophic redshifts; on a smooth n(z) the
     core/residual split is ill-posed and its ``f_out`` prior is set by pixel
     noise in the realizations rather than by the survey.
+``'no_uncertainty'``
+    n(z) is taken as exactly known: **no photo-z parameters at all**, so
+    ``nz_realizations`` is not needed and can be omitted.  This is the
+    perfect-photo-z limit, and therefore the optimistic bound the other two
+    models are measured against -- the difference in a constraint between this
+    and ``'shift_stretch'`` is the cost of not knowing n(z).  Note it does *not*
+    make the forecast insensitive to n(z): the n(z) still sets the kernels, and
+    :meth:`FisherFlex.forecast_bias` still works and is at its most severe here,
+    since nothing is free to absorb the systematic.
 
 Usage is three steps::
 
@@ -93,7 +102,8 @@ from .nz_shift_stretch import shift_stretch_nz
 # imported in a FisherFlex session.
 ccl.gsl_params.LENSING_KERNEL_SPLINE_INTEGRATION = False
 
-__all__ = ["FisherFlex", "FisherFlexResult", "FoM", "marginalize"]
+__all__ = ["FisherFlex", "FisherFlexResult", "FisherFlexBias", "Bias2D",
+           "FoM", "marginalize"]
 
 _PACKAGE_PATH = os.path.dirname(os.path.abspath(__file__))
 
@@ -103,7 +113,10 @@ _PACKAGE_PATH = os.path.dirname(os.path.abspath(__file__))
 SCHEMA_VERSION = 2
 
 #: Photo-z models understood by ``nz_model``.
-NZ_MODELS = ("shift_stretch", "gaussian_outlier")
+NZ_MODELS = ("shift_stretch", "gaussian_outlier", "no_uncertainty")
+
+#: Photo-z parameters carried per source bin, by model.
+N_PZ_PER_BIN = {"shift_stretch": 2, "gaussian_outlier": 3, "no_uncertainty": 0}
 
 #: Fiducial cosmology (Planck 2018-like), matching the A2Z paper.
 DEFAULT_COSMO_KWARGS = dict(
@@ -309,11 +322,17 @@ class _FlexModel:
     # -- n(z) ----------------------------------------------------------
     def source_nz(self, vals):
         out = np.empty((self.n_source, self.z.size))
-        if self.nz_model == "shift_stretch":
+        if self.nz_model in ("shift_stretch", "no_uncertainty"):
+            # Both share the template.  'no_uncertainty' pins the shift at 0 and
+            # the stretch at 1 rather than reading them from ``vals``, where
+            # they do not exist -- and goes through the same call so the two
+            # models produce a bitwise identical fiducial n(z).
+            frozen = self.nz_model == "no_uncertainty"
             for i in range(self.n_source):
                 out[i] = shift_stretch_nz(
                     self.z, self.nz_source_fid[i],
-                    vals[f"zbias{i + 1}"], vals[f"zstretch{i + 1}"],
+                    0.0 if frozen else vals[f"zbias{i + 1}"],
+                    1.0 if frozen else vals[f"zstretch{i + 1}"],
                     self.pz_pivot[i],
                 )
             return out
@@ -328,8 +347,14 @@ class _FlexModel:
         return out
 
     # -- tracers -------------------------------------------------------
-    def legs(self, vals):
-        """All CCL tracers, lens legs first then source legs."""
+    def legs(self, vals, nz_src=None):
+        """All CCL tracers, lens legs first then source legs.
+
+        ``nz_src`` overrides the source n(z) that :meth:`source_nz` would build
+        from ``vals``.  It has to enter here rather than upstream because the
+        intrinsic-alignment amplitude below is an n(z)-weighted average, so an
+        overridden n(z) must carry its own IA term.
+        """
         cosmo, cosmo_key = self.cosmology(vals)
         lf_cosmo, lf_key = (
             self.fiducial_cosmology() if self.ia_lf_cosmo == "fiducial"
@@ -347,7 +372,8 @@ class _FlexModel:
                 has_rsd=False,
                 bias=(self.z_lens, b * np.ones_like(self.z_lens)),
             ))
-        nz_src = self.source_nz(vals)
+        if nz_src is None:
+            nz_src = self.source_nz(vals)
         for i in range(self.n_source):
             ia = _ai_for_nz(self.z, nz_src[i], ai_of_z) * ia0
             tracers.append(ccl.WeakLensingTracer(
@@ -356,8 +382,8 @@ class _FlexModel:
         return cosmo, tracers
 
     # -- spectra -------------------------------------------------------
-    def data_vector(self, vals, layout):
-        cosmo, tracers = self.legs(vals)
+    def data_vector(self, vals, layout, nz_src=None):
+        cosmo, tracers = self.legs(vals, nz_src=nz_src)
         out = np.empty((layout.n_blocks, len(self.ell)))
         for b in range(layout.n_blocks):
             out[b] = ccl.angular_cl(
@@ -431,6 +457,14 @@ def _deriv_one_param(param):
 # --------------------------------------------------------------------------
 
 
+#: Two-dimensional ``Delta chi^2`` for 68.3% / 95.4% / 99.7% containment.
+#:
+#: Shared by :meth:`FisherFlexResult.contour` and :meth:`Bias2D.inside` so that
+#: "the shift lands outside the 2-sigma contour" means the same thing whether it
+#: is asserted numerically or read off a plot.
+CHI2_2D = {1: 2.30, 2: 6.17, 3: 11.8}
+
+
 @dataclass
 class FisherFlexResult:
     """Output of :meth:`FisherFlex.forecast`."""
@@ -486,7 +520,8 @@ class FisherFlexResult:
         return s8v * np.sqrt(om / 0.3), float(np.sqrt(grad @ c @ grad))
 
     # -- plotting ------------------------------------------------------
-    def contour(self, p1, p2, ax=None, sigmas=(1, 2), **kwargs):
+    def contour(self, p1, p2, ax=None, sigmas=(1, 2), centre=None, autolim=True,
+                **kwargs):
         """Draw the 2-parameter confidence ellipses.
 
         Note: ``fisherA2Z.fisher.plot_contours`` takes ``eig[1][argmax]``,
@@ -494,6 +529,17 @@ class FisherFlexResult:
         eigenvectors as columns, so its ellipse orientation is wrong except by
         accident.  This uses the column.  ``fisher.py`` is left untouched so
         published figures are unaffected.
+
+        Parameters
+        ----------
+        centre : (float, float), optional
+            Where to put the ellipse.  Defaults to the fiducial values; a
+            :class:`FisherFlexBias` passes the *shifted* centre here to draw the
+            biased posterior with the same (correct) orientation code.
+        autolim : bool
+            Reset the axis limits to ``centre +/- 3.5 sigma``.  Switch off when
+            overlaying on axes whose limits are already set -- otherwise a
+            second call clobbers them and can clip a bias arrow.
         """
         import matplotlib.pyplot as plt
         from matplotlib.patches import Ellipse
@@ -506,16 +552,17 @@ class FisherFlexResult:
         order = np.argsort(evals)[::-1]
         evals, evecs = evals[order], evecs[:, order]
         angle = np.degrees(np.arctan2(evecs[1, 0], evecs[0, 0]))
-        centre = (self.param_fid[p1], self.param_fid[p2])
-        # 2-D Delta chi^2 for 68.3% / 95.4% containment.
-        scale = {1: 2.30, 2: 6.17, 3: 11.8}
+        if centre is None:
+            centre = (self.param_fid[p1], self.param_fid[p2])
+        centre = (float(centre[0]), float(centre[1]))
         for s in sigmas:
-            w, h = 2.0 * np.sqrt(scale[s] * evals)
+            w, h = 2.0 * np.sqrt(CHI2_2D[s] * evals)
             ax.add_patch(Ellipse(centre, w, h, angle=angle,
                                  fill=False, **kwargs))
-        pad = 3.5 * np.sqrt(cov[0, 0]), 3.5 * np.sqrt(cov[1, 1])
-        ax.set_xlim(centre[0] - pad[0], centre[0] + pad[0])
-        ax.set_ylim(centre[1] - pad[1], centre[1] + pad[1])
+        if autolim:
+            pad = 3.5 * np.sqrt(cov[0, 0]), 3.5 * np.sqrt(cov[1, 1])
+            ax.set_xlim(centre[0] - pad[0], centre[0] + pad[0])
+            ax.set_ylim(centre[1] - pad[1], centre[1] + pad[1])
         ax.set_xlabel(self.param_labels[i])
         ax.set_ylabel(self.param_labels[j])
         return ax
@@ -567,6 +614,288 @@ class FisherFlexResult:
         return "\n".join(lines)
 
 
+@dataclass
+class Bias2D:
+    """Parameter bias in the plane of two parameters.
+
+    Output of :meth:`FisherFlexBias.bias_2d`.  The per-parameter numbers on
+    :class:`FisherFlexBias` answer "how far did this parameter move, in units of
+    its own error bar"; this answers the joint question, "where does the biased
+    point sit relative to the 2-D contour that would be plotted".
+
+    Those are not the same, and the joint answer is usually the larger one: a
+    shift can be a small fraction of each marginal error and still land well
+    outside the ellipse, if it runs across the degeneracy rather than along it.
+    """
+
+    params: tuple
+    labels: tuple
+    fid: np.ndarray
+    delta: np.ndarray
+    shifted: np.ndarray
+    cov: np.ndarray
+    chi2: float
+
+    @property
+    def n_sigma(self):
+        """Mahalanobis distance ``sqrt(chi2)`` -- the joint significance.
+
+        Careful: this is *not* on the same footing as the 1-D ``bias/sigma``.
+        In two dimensions the 68.3% contour sits at ``chi2 = 2.30``, i.e.
+        ``n_sigma = 1.52``, not 1.  Use :attr:`confidence` or :meth:`inside` to
+        compare against a contour.
+        """
+        return float(np.sqrt(self.chi2))
+
+    @property
+    def confidence(self):
+        """Probability enclosed by the contour through the biased point.
+
+        ``1 - exp(-chi2 / 2)``, the 2-dof chi-square CDF.  Reads directly: 0.68
+        means the shift lands exactly on the 1-sigma ellipse.
+        """
+        return float(1.0 - np.exp(-0.5 * self.chi2))
+
+    @property
+    def angle(self):
+        """Direction of the shift in the plane, degrees from the +``p1`` axis."""
+        return float(np.degrees(np.arctan2(self.delta[1], self.delta[0])))
+
+    def inside(self, sigmas=2):
+        """Is the biased point inside the ``sigmas``-sigma contour?"""
+        if sigmas not in CHI2_2D:
+            raise KeyError(f"sigmas must be one of {sorted(CHI2_2D)}")
+        return bool(self.chi2 <= CHI2_2D[sigmas])
+
+    def marginal_n_sigma(self):
+        """The two 1-D ``bias/sigma`` values, for contrast with :attr:`n_sigma`."""
+        return tuple(self.delta / np.sqrt(np.diag(self.cov)))
+
+    def summary(self):
+        p1, p2 = self.params
+        m1, m2 = self.marginal_n_sigma()
+        return "\n".join([
+            f"bias in the ({p1}, {p2}) plane",
+            f"  {p1:<12} {self.fid[0]:>11.5g} -> {self.shifted[0]:>11.5g}"
+            f"   ({m1:+.2f} sigma_1D)",
+            f"  {p2:<12} {self.fid[1]:>11.5g} -> {self.shifted[1]:>11.5g}"
+            f"   ({m2:+.2f} sigma_1D)",
+            f"  joint: chi2 = {self.chi2:.3f}, sqrt(chi2) = {self.n_sigma:.2f}, "
+            f"enclosing {self.confidence:.1%} of the posterior",
+            f"  direction: {self.angle:+.1f} deg;  "
+            f"inside 1 sigma: {self.inside(1)};  inside 2 sigma: {self.inside(2)}",
+        ])
+
+    def __str__(self):
+        return self.summary()
+
+
+@dataclass
+class FisherFlexBias:
+    """Output of :meth:`FisherFlex.forecast_bias`.
+
+    The parameter bias induced by analysing data drawn from ``nz_truth`` with a
+    model built around ``nz_fid``, to first order in the residual -- Eq. (13) of
+    Zhang et al. (2025):
+
+    ``delta_p = F^-1 . (dC_l/dp . Cov^-1 . (C_l^truth - C_l^fid))``
+
+    ``F`` is the Fisher matrix of :attr:`result`, priors included, evaluated
+    under the same scale cuts as the residual.
+
+    Caveat, stated in the paper itself: this *overestimates* the bias a real
+    analysis would suffer.  The Fisher posterior is centred on the centre of the
+    prior, whereas an MCMC handed a biased data vector shifts the photo-z
+    nuisances toward the true values and self-calibrates part of the systematic
+    away.  Check :meth:`mafe` too -- a large residual invalidates the first-order
+    expansion the whole formula rests on.
+    """
+
+    delta_p: dict
+    bias_vec: np.ndarray
+    result: FisherFlexResult
+    delta_cl: np.ndarray
+    data_vector: np.ndarray
+    nz_truth: np.ndarray
+    nz_fid: np.ndarray
+    z: np.ndarray
+    n_data_used: int
+
+    @property
+    def param_order(self):
+        return self.result.param_order
+
+    @property
+    def param_labels(self):
+        return self.result.param_labels
+
+    def index(self, param):
+        return self.result.index(param)
+
+    def shift(self, param):
+        """Bias on one parameter, in its own units."""
+        if not isinstance(param, str):
+            param = self.param_order[int(param)]
+        return float(self.delta_p[param])
+
+    def shifts(self):
+        return dict(self.delta_p)
+
+    def n_sigma(self, param):
+        """Bias in units of the marginalized 1-sigma uncertainty."""
+        return self.shift(param) / self.result.sigma(param)
+
+    def n_sigmas(self):
+        return {p: self.n_sigma(p) for p in self.param_order}
+
+    def shifted_fid(self, param):
+        """Where the inferred value lands: fiducial + bias."""
+        name = param if isinstance(param, str) else self.param_order[int(param)]
+        return self.result.param_fid[name] + self.shift(name)
+
+    def s8(self):
+        """``(S8_fid, S8_shifted, delta_S8, delta_S8 / sigma_S8)``.
+
+        The shift is evaluated from the shifted ``(Omega_m, sigma_8)`` rather
+        than by propagating the gradient, matching ``util.get_s8_shift``.
+        """
+        s8_fid, s8_err = self.result.s8()
+        om = self.shifted_fid("omega_m")
+        sig8 = self.shifted_fid("sigma_8")
+        s8_shift = sig8 * np.sqrt(om / 0.3)
+        d = s8_shift - s8_fid
+        return s8_fid, s8_shift, d, d / s8_err
+
+    def bias_2d(self, p1, p2):
+        """Bias in the plane of two parameters -> :class:`Bias2D`.
+
+        The 2-D companion to :meth:`FisherFlexResult.fom`.  Marginalizes over
+        every other parameter, then measures the shift against the resulting
+        2x2 covariance:
+
+        ``chi2 = delta^T Cov_2x2^-1 delta``
+
+        Reuses :meth:`FisherFlexResult.marginalize`, which returns exactly
+        ``Cov_2x2^-1``.
+
+        Examples
+        --------
+        >>> b2 = bias.bias_2d("omega_m", "sigma_8")
+        >>> b2.inside(2), round(b2.confidence, 3)
+        (True, 0.246)
+        """
+        i, j = self.result.index(p1), self.result.index(p2)
+        delta = np.array([self.shift(p1), self.shift(p2)])
+        fid = np.array([self.result.param_fid[p1], self.result.param_fid[p2]])
+        inv_cov = self.result.marginalize(p1, p2)
+        return Bias2D(
+            params=(p1, p2),
+            labels=(self.param_labels[i], self.param_labels[j]),
+            fid=fid, delta=delta, shifted=fid + delta,
+            cov=self.result.cov[np.ix_([i, j], [i, j])],
+            chi2=float(delta @ inv_cov @ delta),
+        )
+
+    def mafe(self):
+        """Mean absolute fractional error of the residual, Eq. (18).
+
+        Averaged over the elements the forecast actually used.  This is the
+        sanity check on the first-order expansion: a few per cent is fine, tens
+        of per cent means :attr:`delta_p` should not be trusted quantitatively.
+        """
+        m = self.result.mask
+        if not m.any():
+            return float("nan")
+        return float(np.mean(np.abs(self.delta_cl[m] / self.data_vector[m])))
+
+    def summary(self, params=None):
+        """One line per parameter: fiducial, bias, bias/sigma, shifted value."""
+        params = params or self.param_order
+        lines = [f"{'parameter':<14}{'fiducial':>12}{'bias':>12}"
+                 f"{'bias/sigma':>12}{'shifted':>12}"]
+        for p in params:
+            lines.append(
+                f"{p:<14}{self.result.param_fid[p]:>12.5g}{self.shift(p):>12.5g}"
+                f"{self.n_sigma(p):>12.3f}{self.shifted_fid(p):>12.5g}"
+            )
+        return "\n".join(lines)
+
+    # -- plotting ------------------------------------------------------
+    def arrow(self, p1, p2, ax=None, shifted_contour=False, expand_lims=True,
+              sigmas=(2,), **kwargs):
+        """Draw the fiducial -> biased arrow for two parameters.
+
+        Uses a :class:`~matplotlib.patches.FancyArrowPatch` so the head is sized
+        in display units; an ``ax.arrow`` head width has to be retuned for every
+        parameter pair, since e.g. ``(Omega_m, sigma_8)`` and ``(w_0, w_a)``
+        differ by orders of magnitude in axis scale.
+
+        Parameters
+        ----------
+        shifted_contour : bool
+            Also draw the posterior re-centred on the biased values, dashed --
+            the blue/orange pair of the paper's Fig. 6.
+        expand_lims : bool
+            Grow (never shrink) the axis limits so the arrow head stays visible.
+        """
+        import matplotlib.pyplot as plt
+        from matplotlib.patches import FancyArrowPatch
+
+        if ax is None:
+            _, ax = plt.subplots()
+        start = (self.result.param_fid[p1], self.result.param_fid[p2])
+        end = (self.shifted_fid(p1), self.shifted_fid(p2))
+
+        if shifted_contour:
+            self.result.contour(p1, p2, ax=ax, sigmas=sigmas, centre=end,
+                                autolim=False, linestyle="--",
+                                color=kwargs.get("color", "C1"))
+
+        style = dict(arrowstyle="-|>", mutation_scale=14, color="C1", lw=1.4,
+                     shrinkA=0, shrinkB=0, zorder=5)
+        style.update(kwargs)
+        ax.add_patch(FancyArrowPatch(start, end, **style))
+
+        if expand_lims:
+            for lo_hi, setter, vals in (
+                (ax.get_xlim(), ax.set_xlim, (start[0], end[0])),
+                (ax.get_ylim(), ax.set_ylim, (start[1], end[1])),
+            ):
+                lo, hi = lo_hi
+                pad = 0.05 * (hi - lo)
+                setter(min(lo, min(vals) - pad), max(hi, max(vals) + pad))
+        return ax
+
+    def corner_arrows(self, params, fig, shifted_contour=False, **kwargs):
+        """Overlay bias arrows on a figure made by :meth:`FisherFlexResult.corner`.
+
+        Off-diagonal panels get an arrow; diagonal panels get a vertical line at
+        the shifted value.
+        """
+        n = len(params)
+        axes = np.array(fig.axes).reshape(n, n)
+        color = kwargs.get("color", "C1")
+        # Corner panels are small, so the default head swamps a sub-sigma arrow.
+        kwargs.setdefault("mutation_scale", 9)
+        for a in range(n):
+            for b in range(n):
+                if b > a:
+                    continue
+                ax = axes[a, b]
+                if a == b:
+                    ax.axvline(self.shifted_fid(params[a]), color=color,
+                               ls="--", lw=1.2)
+                    continue
+                # corner() blanks the labels of interior panels; drawing a
+                # shifted contour puts them back, so restore what was there.
+                labels = ax.get_xlabel(), ax.get_ylabel()
+                self.arrow(params[b], params[a], ax=ax,
+                           shifted_contour=shifted_contour, **kwargs)
+                ax.set_xlabel(labels[0])
+                ax.set_ylabel(labels[1])
+        return fig
+
+
 # --------------------------------------------------------------------------
 # the class
 # --------------------------------------------------------------------------
@@ -579,9 +908,10 @@ class FisherFlex:
     ----------
     nz_source : ndarray, shape (n_tomo, n_z)
         Central source n(z) per tomographic bin.  Normalization is irrelevant.
-    nz_realizations : ndarray, shape (n_real, n_tomo, n_z) or (n_tomo, n_real, n_z)
+    nz_realizations : ndarray, shape (n_real, n_tomo, n_z) or (n_tomo, n_real, n_z), optional
         Realizations of the same n(z); their scatter sets the photo-z prior.
-        Pass ``None`` to skip and supply ``photoz_prior_cov`` directly.
+        Omit it and supply ``photoz_prior_cov`` directly, or omit both with
+        ``nz_model='no_uncertainty'``, which has no photo-z prior at all.
     z_grid : ndarray, shape (n_z,)
     neff_source : float or ndarray, shape (n_tomo,)
         Effective source number density per bin, arcmin^-2.
@@ -592,10 +922,13 @@ class FisherFlex:
     cosmo : ccl.Cosmology, optional
         Fiducial cosmology.  Defaults to the A2Z Planck-like cosmology.
     mode : {'3x2pt', '2x2pt', 'cosmic_shear'}
-    nz_model : {'shift_stretch', 'gaussian_outlier'}
+    nz_model : {'shift_stretch', 'gaussian_outlier', 'no_uncertainty'}
         Photo-z parameterization; see the class docstring.  The default keeps
         the measured n(z) as its own template and gives each bin a shift and a
-        stretch.  ``'gaussian_outlier'`` is the A2Z Gaussian-core-plus-outlier
+        stretch.  ``'no_uncertainty'`` treats n(z) as exactly known and adds no
+        photo-z parameters at all -- the perfect-photo-z limit, and the
+        optimistic bound on any of the others.
+        ``'gaussian_outlier'`` is the A2Z Gaussian-core-plus-outlier
         model, which adds a third parameter per bin.
     step : float
         Default absolute step for the numerical derivatives.  Per-parameter
@@ -628,8 +961,9 @@ class FisherFlex:
         when ``n_real == n_tomo``.
     """
 
-    def __init__(self, nz_source, nz_realizations, z_grid, neff_source, fsky,
-                 sigma_e, cosmo=None, mode="3x2pt", nz_model="shift_stretch",
+    def __init__(self, nz_source, nz_realizations=None, z_grid=None,
+                 neff_source=None, fsky=None,
+                 sigma_e=None, cosmo=None, mode="3x2pt", nz_model="shift_stretch",
                  step=0.001, y1=False,
                  lens_nz=None, z_lens=None, lens_neff=None, gbias=None,
                  n_lens_bins=None, ia_params=None, ggl_pairs="z_offset",
@@ -640,6 +974,16 @@ class FisherFlex:
                  verbose=True):
         self.verbose = verbose
         self.mode = mode
+        # Only ``nz_realizations`` is genuinely optional (nz_model
+        # 'no_uncertainty' has no prior to derive, and the other models accept
+        # photoz_prior_cov instead).  The rest default to None purely so that
+        # ``nz_realizations`` can, without disturbing the positional order.
+        missing = [n for n, v in (("z_grid", z_grid), ("neff_source", neff_source),
+                                  ("fsky", fsky), ("sigma_e", sigma_e))
+                   if v is None]
+        if missing:
+            raise TypeError(
+                f"FisherFlex() missing required argument(s): {', '.join(missing)}")
         if mode not in fl.MODE_PROBES:
             raise ValueError(f"unknown mode {mode!r}; use one of {sorted(fl.MODE_PROBES)}.")
         if nz_model not in NZ_MODELS:
@@ -777,7 +1121,18 @@ class FisherFlex:
         """Build the per-bin n(z) template, fiducial parameters and prior."""
         self.smooth_realizations = smooth
         self.realization_params = None
-        self.n_pz_per_bin = 2 if self.nz_model == "shift_stretch" else 3
+        self.n_pz_per_bin = N_PZ_PER_BIN[self.nz_model]
+
+        if self.nz_model == "no_uncertainty":
+            self._setup_no_uncertainty(decompose_kwargs)
+            if realizations is not None or prior_cov is not None:
+                warnings.warn(
+                    "nz_model='no_uncertainty' has no photo-z parameters, so "
+                    "nz_realizations and photoz_prior_cov are ignored."
+                )
+            self.pz_prior_cov = np.zeros((self.n_source, 0, 0))
+            self.pz_realization_offset = None
+            return
 
         if self.nz_model == "shift_stretch":
             self._setup_shift_stretch(decompose_kwargs)
@@ -836,6 +1191,30 @@ class FisherFlex:
         self.pz_sigma = m.sigma_fid
         self.pz_fout = np.zeros(self.n_source)
         self.nz_out = np.zeros((0, 0))  # no outlier template in this model
+        self.pz_degenerate = np.zeros(self.n_source, dtype=bool)
+
+    def _setup_no_uncertainty(self, decompose_kwargs):
+        """The measured n(z) is taken as exactly known: no photo-z parameters.
+
+        Shares the shift-and-stretch template machinery -- it is the same
+        normalized n(z), just with nothing free to vary.  ``pz_mu`` and
+        ``pz_sigma`` are still filled in with the moments of n(z) so that
+        reporting code can read them, but no parameter is attached to either.
+        """
+        if decompose_kwargs:
+            warnings.warn(
+                "decompose_kwargs is ignored for nz_model='no_uncertainty': "
+                "nothing is fitted."
+            )
+        m = nzs.build_shift_stretch_model(self.z, self.nz_source)
+        self.shift_stretch = m
+        self.decomposition = None
+        self.nz_source_fid = m.nz_fid
+        self.pz_pivot = m.z_pivot
+        self.pz_mu = m.z_pivot
+        self.pz_sigma = m.sigma_fid
+        self.pz_fout = np.zeros(self.n_source)
+        self.nz_out = np.zeros((0, 0))
         self.pz_degenerate = np.zeros(self.n_source, dtype=bool)
 
     def _setup_gaussian_outlier(self, decompose_kwargs):
@@ -916,15 +1295,20 @@ class FisherFlex:
     def _pz_param_names(self, i):
         """Photo-z parameter names of source bin ``i`` (0-based).
 
-        The order matches the rows and columns of ``pz_prior_cov[i]``.
+        The order matches the rows and columns of ``pz_prior_cov[i]``.  Empty
+        for ``nz_model='no_uncertainty'``.
         """
+        if self.nz_model == "no_uncertainty":
+            return []
         if self.nz_model == "shift_stretch":
             return [f"zbias{i + 1}", f"zstretch{i + 1}"]
         return [f"zbias{i + 1}", f"zvariance{i + 1}", f"zoutlier{i + 1}"]
 
     def _setup_params(self):
         ns, nl = self.n_source, self.n_lens
-        if self.nz_model == "shift_stretch":
+        if self.nz_model == "no_uncertainty":
+            pz_names, pz_labels = [], []
+        elif self.nz_model == "shift_stretch":
             pz_names = ([f"zbias{i}" for i in range(1, ns + 1)]
                         + [f"zstretch{i}" for i in range(1, ns + 1)])
             pz_labels = ([rf"$\delta z_{{{i}}}$" for i in range(1, ns + 1)]
@@ -960,6 +1344,8 @@ class FisherFlex:
         }
         self.fid.update(self.ia_params)
         for i in range(ns):
+            if self.nz_model == "no_uncertainty":
+                break
             self.fid[f"zbias{i + 1}"] = 0.0
             if self.nz_model == "shift_stretch":
                 self.fid[f"zstretch{i + 1}"] = 1.0
@@ -1175,6 +1561,11 @@ class FisherFlex:
         dict
             ``{smoothing: ndarray (n_tomo, n_pz_per_bin) of prior sigmas}``.
         """
+        if self.nz_model == "no_uncertainty":
+            raise RuntimeError(
+                "nz_model='no_uncertainty' has no photo-z parameters and so no "
+                "prior to report on."
+            )
         real = nzd.orient_realizations(realizations, self.n_source, realizations_axis)
         real = real[:n_max]
         out = {}
@@ -1314,7 +1705,7 @@ class FisherFlex:
         self.mode = on_disk_mode
         # forecast() needs this to group the photo-z parameters for the prior.
         self.nz_model = on_disk_nz_model
-        self.n_pz_per_bin = 2 if on_disk_nz_model == "shift_stretch" else 3
+        self.n_pz_per_bin = N_PZ_PER_BIN[on_disk_nz_model]
         self._computed = True
         self._log(f"Loaded precomputed derivatives and covariance from {path}")
         return self
@@ -1433,12 +1824,118 @@ class FisherFlex:
             n_data_used=n_data, prior_sigma=prior_sigma,
         )
 
+    # ------------------------------------------------------------------
+    # parameter bias from a wrong n(z)
+    # ------------------------------------------------------------------
+
+    def forecast_bias(self, nz_truth, forecast_params=None, z_truth=None,
+                      model=None):
+        """Parameter bias induced by analysing data drawn from ``nz_truth``.
+
+        Forward-models the data vector twice -- once with the fiducial source
+        n(z), once with ``nz_truth`` -- and propagates the residual through
+        Eq. (13) of Zhang et al. (2025):
+
+        ``delta_p = F^-1 . (dC_l/dp . Cov^-1 . (C_l^truth - C_l^fid))``
+
+        Only the *source* n(z) is replaced; the lens sample stays fiducial.
+
+        Parameters
+        ----------
+        nz_truth : ndarray, shape (n_source, n_z)
+            The true source n(z).  Rows are renormalized to unit integral.
+        forecast_params : dict, optional
+            Passed verbatim to :meth:`forecast`, so the bias is evaluated under
+            exactly the scale cuts, probes, priors and ``drop_params`` of the
+            forecast it is quoted against.
+        z_truth : ndarray, optional
+            Redshift grid of ``nz_truth`` if it differs from ``self.z``; each
+            row is interpolated onto ``self.z``.
+        model : _FlexModel, optional
+            A pre-built forward model to reuse.  Building one re-reads the
+            k- and e-correction tables and rebuilds the luminosity function
+            (~0.3 s), so pass it when scanning many ``nz_truth``.
+
+        Returns
+        -------
+        FisherFlexBias
+
+        Notes
+        -----
+        Two caveats worth knowing before quoting the number.  First, the paper
+        notes this *overestimates* the realized bias: the Fisher posterior sits
+        at the centre of the prior, while an MCMC lets the photo-z nuisances
+        drift toward the truth and absorb part of the systematic.  Second,
+        ``drop_params`` *fixes* parameters rather than marginalizing them, so
+        dropped nuisances can no longer absorb anything and the bias on the
+        survivors grows.
+        """
+        if not self._computed:
+            raise RuntimeError("call compute() (or compute(precompute=...)) first.")
+
+        nz_truth = np.atleast_2d(np.asarray(nz_truth, dtype=float))
+        if nz_truth.shape[0] != self.n_source:
+            raise ValueError(
+                f"nz_truth has {nz_truth.shape[0]} tomographic bins but this "
+                f"forecast has {self.n_source}."
+            )
+        if z_truth is not None:
+            z_truth = np.asarray(z_truth, dtype=float)
+            nz_truth = np.array([np.interp(self.z, z_truth, row, left=0.0,
+                                           right=0.0) for row in nz_truth])
+        elif nz_truth.shape[1] != self.z.size:
+            raise ValueError(
+                f"nz_truth has {nz_truth.shape[1]} redshift samples but the "
+                f"grid has {self.z.size}; pass z_truth= to interpolate."
+            )
+        if np.any(nz_truth < 0):
+            warnings.warn("nz_truth has negative values; clipping to zero.")
+            nz_truth = np.clip(nz_truth, 0.0, None)
+        norm = np.trapz(nz_truth, self.z, axis=-1)
+        if np.any(norm <= 0):
+            raise ValueError("nz_truth has a bin with zero integral.")
+        nz_truth = nz_truth / norm[:, None]
+
+        res = self.forecast(**(forecast_params or {}))
+
+        m = model if model is not None else self._model()
+        d_cen = m.data_vector(self.fid, self.layout, nz_src=self.nz_source_fid)
+        d_true = m.data_vector(self.fid, self.layout, nz_src=nz_truth)
+
+        # The re-modelled baseline must reproduce the cached fiducial vector.
+        # If it does not, the npz is stale or the cosmology has moved, and the
+        # stored derivatives no longer describe this model.
+        scale = np.maximum(np.abs(self.data_vector), 1e-300)
+        drift = np.max(np.abs(d_cen - self.data_vector) / scale)
+        if drift > 1e-8:
+            warnings.warn(
+                f"the re-modelled fiducial data vector differs from the cached "
+                f"one by up to {drift:.2e} (relative); the stored derivatives "
+                "may not correspond to this model."
+            )
+
+        delta = d_true - d_cen
+        keep = [self.param_order.index(p) for p in res.param_order]
+        bias_vec, n_used = fl.bias_vector_from_derivs(
+            self.deriv[keep], self.cov_blocks, delta, res.mask)
+        # res.cov rather than a fresh inverse, so the shifts stay exactly
+        # consistent with the sigmas they get divided by.
+        delta_p = res.cov @ bias_vec
+
+        return FisherFlexBias(
+            delta_p={p: float(v) for p, v in zip(res.param_order, delta_p)},
+            bias_vec=bias_vec, result=res, delta_cl=delta,
+            data_vector=self.data_vector, nz_truth=nz_truth,
+            nz_fid=np.asarray(self.nz_source_fid), z=self.z,
+            n_data_used=n_used,
+        )
+
     def _add_photoz_prior_correlations(self, fisher, names, prior_sigma):
         """Replace the diagonal photo-z prior with the full per-bin block."""
         fisher = fisher.copy()
         for b in range(self.n_source):
             group = self._pz_param_names(b)
-            if not all(t in names for t in group):
+            if not group or not all(t in names for t in group):
                 continue
             idx = [names.index(t) for t in group]
             cov = self.pz_prior_cov[b]
