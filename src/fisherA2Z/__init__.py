@@ -1,4 +1,5 @@
 from importlib.metadata import PackageNotFoundError, version as _version
+import numpy as np
 
 __all__ = ["cli"]
 
@@ -10,3 +11,9 @@ except PackageNotFoundError:  # not installed, e.g. running from a source tree
     __version__ = "unknown"
 
 from fisherA2Z import *
+
+# monkey patch np.trapz
+try:
+    _ = np.trapz
+except AttributeError:
+    setattr(np, 'trapz', np.trapezoid)
