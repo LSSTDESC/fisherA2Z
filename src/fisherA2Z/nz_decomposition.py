@@ -328,6 +328,7 @@ def build_model_nz(z, mu, sigma, f_out, nz_out, renormalize=True):
     nz = np.clip(nz, 0.0, None)
     if renormalize:
         total = np.trapz(nz, z)
+
         if total > 0:
             nz = nz / total
     return nz
