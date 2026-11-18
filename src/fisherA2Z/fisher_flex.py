@@ -366,9 +366,14 @@ class _FlexModel:
         tracers = []
         for i in range(self.n_lens):
             b = vals[f"gbias{i + 1}"]
+            nz_l = self.nz_lens[i]
+            if f"lzbias{i + 1}" in vals:
+                # rigid shift of the lens bin, the same operation as the source
+                # shift (stretch held at 1)
+                nz_l = shift_stretch_nz(self.z_lens, nz_l, vals[f"lzbias{i + 1}"], 1.0)
             tracers.append(ccl.NumberCountsTracer(
                 cosmo,
-                dndz=(self.z_lens, self.nz_lens[i]),
+                dndz=(self.z_lens, nz_l),
                 has_rsd=False,
                 bias=(self.z_lens, b * np.ones_like(self.z_lens)),
             ))
@@ -943,6 +948,11 @@ class FisherFlex:
         by the dN/dz weights, giving 2.3-6.0 per bin for the 10-bin Y10 sample.
         A scalar is broadcast to every bin and warns, since that multiplies the
         sample by ``n_lens``.
+    lens_dz_prior : float or ndarray, shape (n_lens,), optional
+        Gaussian prior width on a mean-redshift shift of each lens bin.  When
+        given, one nuisance parameter ``lzbias{i}`` per lens bin is added
+        (fiducial 0; the lens n(z) is shifted rigidly, as the source shift is).
+        The default ``None`` keeps the lens n(z) exactly known, as before.
     ggl_pairs : {'z_offset', 'a2z', 'all'} or sequence of (lens, source)
     ggl_offset : float
         For ``'z_offset'``: require ``mean(z)_source > mean(z)_lens + offset``.
@@ -966,7 +976,8 @@ class FisherFlex:
                  sigma_e=None, cosmo=None, mode="3x2pt", nz_model="shift_stretch",
                  step=0.001, y1=False,
                  lens_nz=None, z_lens=None, lens_neff=None, gbias=None,
-                 n_lens_bins=None, ia_params=None, ggl_pairs="z_offset",
+                 n_lens_bins=None, lens_dz_prior=None, ia_params=None,
+                 ggl_pairs="z_offset",
                  ggl_offset=0.3, prior_mode="full", smooth_realizations=None,
                  deriv_method="numdifftools", realizations_axis=None,
                  ia_lf_cosmo="varied", omega_b_convention="fixed_omega_m",
@@ -1023,6 +1034,14 @@ class FisherFlex:
 
         # -- lens sample -----------------------------------------------
         self._setup_lens(lens_nz, z_lens, lens_neff, gbias, n_lens_bins)
+        if lens_dz_prior is None:
+            self.lens_dz_prior = None
+        else:
+            self.lens_dz_prior = np.broadcast_to(
+                np.atleast_1d(np.asarray(lens_dz_prior, dtype=float)),
+                (self.n_lens,)).astype(float)
+            if np.any(self.lens_dz_prior <= 0):
+                raise ValueError("lens_dz_prior must be positive.")
 
         # -- photo-z model ---------------------------------------------
         self._setup_photoz(nz_realizations, realizations_axis, smooth_realizations,
@@ -1310,14 +1329,17 @@ class FisherFlex:
                          + [rf"$\sigma_{{z,{i}}}$" for i in range(1, ns + 1)]
                          + [rf"$f_{{out,{i}}}$" for i in range(1, ns + 1)])
 
+        lz_names = ([] if self.lens_dz_prior is None
+                    else [f"lzbias{i}" for i in range(1, nl + 1)])
         self.param_order = (
-            list(COSMO_PARAMS) + list(IA_PARAMS) + pz_names
+            list(COSMO_PARAMS) + list(IA_PARAMS) + pz_names + lz_names
             + [f"gbias{i}" for i in range(1, nl + 1)]
         )
         self.param_labels = (
             [r"$\Omega_m$", r"$\sigma_8$", r"$n_s$", r"$w_0$", r"$w_a$",
              r"$\Omega_b$", r"$h$", r"$A_0$", r"$\beta$", r"$\eta_l$", r"$\eta_h$"]
             + pz_labels
+            + [rf"$\delta z^{{\rm l}}_{{{i}}}$" for i in range(1, len(lz_names) + 1)]
             + [rf"$b_g^{{{i}}}$" for i in range(1, nl + 1)]
         )
 
@@ -1343,6 +1365,8 @@ class FisherFlex:
                 self.fid[f"zoutlier{i + 1}"] = float(self.pz_fout[i])
         for i in range(nl):
             self.fid[f"gbias{i + 1}"] = float(self.gbias[i])
+        for i, name in enumerate(lz_names):
+            self.fid[name] = 0.0
 
         # Priors.  Cosmology/IA/gbias are the paper's Gaussian priors; photo-z
         # comes from the realization scatter, kept as per-bin blocks.
@@ -1351,6 +1375,8 @@ class FisherFlex:
         self.prior_sigma.update(IA_PRIOR_SIGMA)
         for i in range(nl):
             self.prior_sigma[f"gbias{i + 1}"] = GBIAS_PRIOR_SIGMA
+        for i, name in enumerate(lz_names):
+            self.prior_sigma[name] = float(self.lens_dz_prior[i])
         for i in range(ns):
             sd = np.sqrt(np.diag(self.pz_prior_cov[i]))
             for k, name in enumerate(self._pz_param_names(i)):
@@ -1622,6 +1648,8 @@ class FisherFlex:
                 prior_mode=self.prior_mode, ia_lf_cosmo=self.ia_lf_cosmo,
                 omega_b_convention=self.omega_b_convention,
                 ggl_pairs=[list(p) for p in self.ggl_pairs],
+                lens_dz_prior=(None if self.lens_dz_prior is None
+                               else self.lens_dz_prior.tolist()),
             )),
         )
         self._log(f"Saved to {path}")
@@ -1734,6 +1762,8 @@ class FisherFlex:
         obj.ia_lf_cosmo = cfg["ia_lf_cosmo"]
         obj.omega_b_convention = cfg["omega_b_convention"]
         obj.ggl_pairs = [tuple(p) for p in cfg["ggl_pairs"]]
+        ldz = cfg.get("lens_dz_prior")
+        obj.lens_dz_prior = None if ldz is None else np.asarray(ldz, dtype=float)
         obj.deriv_method = str(d["deriv_method"])
         obj.param_deriv_method = {p: None for p in obj.param_order}
         obj.cosmo = None
