@@ -2,7 +2,7 @@
 
 ## Introduction
 
-FisherA2Z is a Fisher forecasting code initially developed by Husni Almoubayyed for his PhD thesis Chapter 4. Tianqing Zhang refurbished the code in 2024 and prepared Zhang et al in prep. "A2Z" stands for the initial of Almoubayyed and Zhang. 
+FisherA2Z is a Fisher forecasting code initially developed by Husni Almoubayyed for his PhD thesis Chapter 4. Tianqing Zhang refurbished the code in 2024 for [Zhang et al. (2026), MNRAS 545, staf1829](https://doi.org/10.1093/mnras/staf1829) (see [Citation](#citation)). "A2Z" stands for the initial of Almoubayyed and Zhang. 
 
 This repository includes code used for the Fisher Information matrix computation used to assess the impact of photo-z modeling errors on 3x2pt inferences.
 
@@ -86,6 +86,33 @@ f.process()
 then the Fisher information matrix will be stored in f.fisher. Also see Tutorial_01/02/03
 
 Enjoy Fishering! 
+
+## Citation
+
+If you use fisherA2Z, please cite:
+
+Zhang, T., Almoubayyed, H., Mandelbaum, R., et al. (LSST DESC) 2026, *Forecasting the impact of source galaxy photometric redshift uncertainties on the LSST 3×2pt analysis*, MNRAS, 545, staf1829 — [MNRAS](https://doi.org/10.1093/mnras/staf1829) · [arXiv:2507.01374](https://arxiv.org/abs/2507.01374)
+
+```bibtex
+@ARTICLE{2026MNRAS.545f1829Z,
+       author = {{Zhang}, Tianqing and {Almoubayyed}, Husni and {Mandelbaum}, Rachel and {Rau}, Markus Michael and {{\v{S}}ar{\v{c}}evi{\'c}}, Nikolina and {Leonard}, C. Danielle and {Newman}, Jeffrey A. and {Andrews}, Brett H. and {Liang}, Shuang and {LSST Dark Energy Science Collaboration}},
+        title = "{Forecasting the impact of source galaxy photometric redshift uncertainties on the LSST 3 {\texttimes} 2pt analysis}",
+      journal = {\mnras},
+     keywords = {gravitational lensing: weak, methods: statistical, dark energy, large-scale structure of Universe, Cosmology and Nongalactic Astrophysics},
+         year = 2026,
+        month = jan,
+       volume = {545},
+       number = {2},
+          eid = {staf1829},
+        pages = {staf1829},
+          doi = {10.1093/mnras/staf1829},
+archivePrefix = {arXiv},
+       eprint = {2507.01374},
+ primaryClass = {astro-ph.CO},
+       adsurl = {https://scixplorer.org/abs/2026MNRAS.545f1829Z},
+      adsnote = {Provided by the SAO/NASA Astrophysics Data System}
+}
+```
 
 
 <!-- ## Analysis
